@@ -804,6 +804,14 @@ function buildOutboundReportHtml_(params, reportData) {
 // EXCEL GENERATION & STYLING
 // ============================================================================
 
+function saveReportToFolder(blob, reportType, frequency) {
+  const rootFolder = DriveApp.getFolderById(FOLDERS.IMS_Reports);
+  const typeFolder = getOrCreateFolder(rootFolder, reportType + ' Reports');
+  const frequencyFolder = getOrCreateFolder(typeFolder, frequency);
+  const yearFolder = getOrCreateFolder(frequencyFolder, String(new Date().getFullYear()));
+  return yearFolder.createFile(blob);
+}
+
 function saveHtmlAsPdfToReports_(html, filename, reportType, frequency) {
   const blob = HtmlService.createHtmlOutput(html).getBlob().setName(filename).getAs(MimeType.PDF);
   return saveReportToFolder(blob, reportType, frequency);

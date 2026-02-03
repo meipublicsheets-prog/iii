@@ -63,6 +63,63 @@ function resolveAssetType_(rowAssetType, fbpn, assetMap) {
 }
 
 // ============================================================================
+// DATE RANGE PRESETS
+// ============================================================================
+
+function getDateRangePreset(preset) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let startDate, endDate;
+
+  switch (preset) {
+    case 'today':
+      startDate = new Date(today);
+      endDate = new Date(today);
+      break;
+    case 'yesterday':
+      startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - 1);
+      endDate = new Date(startDate);
+      break;
+    case 'thisWeek':
+      startDate = new Date(today);
+      startDate.setDate(today.getDate() - today.getDay()); // Sunday
+      endDate = new Date(today);
+      break;
+    case 'lastWeek':
+      startDate = new Date(today);
+      startDate.setDate(today.getDate() - today.getDay() - 7); // Last Sunday
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6); // Last Saturday
+      break;
+    case 'thisMonth':
+      startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+      endDate = new Date(today);
+      break;
+    case 'lastMonth':
+      startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      endDate = new Date(today.getFullYear(), today.getMonth(), 0); // Last day of previous month
+      break;
+    default:
+      startDate = new Date(today);
+      endDate = new Date(today);
+  }
+
+  // Format as mm/dd/yyyy for the modal's convertToInputDate function
+  const formatDate = (d) => {
+    const month = (d.getMonth() + 1).toString();
+    const day = d.getDate().toString();
+    const year = d.getFullYear().toString();
+    return `${month}/${day}/${year}`;
+  };
+
+  return {
+    startDate: formatDate(startDate),
+    endDate: formatDate(endDate)
+  };
+}
+
+// ============================================================================
 // MAIN GENERATION FUNCTIONS
 // ============================================================================
 
@@ -182,9 +239,13 @@ function getInboundReportData(params) {
     const da = a._dateObj.getTime();
     const db = b._dateObj.getTime();
     if (da !== db) return da - db;
-    if (a.project !== b.project) return a.project.localeCompare(b.project);
-    if (a.poNumber !== b.poNumber) return a.poNumber.localeCompare(b.poNumber);
-    return a.bol.localeCompare(b.bol);
+    const projA = String(a.project || '');
+    const projB = String(b.project || '');
+    if (projA !== projB) return projA.localeCompare(projB);
+    const poA = String(a.poNumber || '');
+    const poB = String(b.poNumber || '');
+    if (poA !== poB) return poA.localeCompare(poB);
+    return String(a.bol || '').localeCompare(String(b.bol || ''));
   });
   
   return { rows: rows, dateRange: formatDate(startDate) + ' - ' + formatDate(endDate) };
@@ -229,7 +290,7 @@ function getOutboundReportData(params) {
   
   rows.sort((a, b) => {
     if (a.dateObj.getTime() !== b.dateObj.getTime()) return a.dateObj.getTime() - b.dateObj.getTime();
-    return a.orderNumber.localeCompare(b.orderNumber);
+    return String(a.orderNumber || '').localeCompare(String(b.orderNumber || ''));
   });
   
   return { rows: rows, dateRange: formatDate(startDate) + ' - ' + formatDate(endDate) };
@@ -272,9 +333,71 @@ function buildInboundReportHtml_(params, reportData) {
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  let bodyHtml = '';
+  // Build daily summary table data
+  const dailySummary = [];
   Object.keys(groups).sort().forEach(dateKey => {
-    // Calculate date totals
+    let dateTotal = 0;
+    let dateLines = 0;
+    const dateProjects = new Set();
+    const datePOs = new Set();
+    const dateBOLs = new Set();
+    Object.keys(groups[dateKey]).forEach(proj => {
+      dateProjects.add(proj);
+      Object.keys(groups[dateKey][proj]).forEach(po => {
+        datePOs.add(po);
+        Object.keys(groups[dateKey][proj][po]).forEach(bol => {
+          dateBOLs.add(bol);
+          const items = groups[dateKey][proj][po][bol];
+          dateLines += items.length;
+          items.forEach(x => dateTotal += Number(x.qty || 0) || 0);
+        });
+      });
+    });
+    dailySummary.push({ date: dateKey, lines: dateLines, qty: dateTotal, projects: dateProjects.size, pos: datePOs.size, bols: dateBOLs.size });
+  });
+
+  // Build summary table HTML
+  let summaryTableHtml = `
+    <div class="summary-section">
+      <div class="summary-title">Daily Summary</div>
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Lines</th>
+            <th>Units</th>
+            <th>Projects</th>
+            <th>POs</th>
+            <th>BOLs</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dailySummary.map((d, idx) => `
+            <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
+              <td class="date-cell">${esc(d.date)}</td>
+              <td>${d.lines.toLocaleString()}</td>
+              <td class="qty-cell">${d.qty.toLocaleString()}</td>
+              <td>${d.projects}</td>
+              <td>${d.pos}</td>
+              <td>${d.bols}</td>
+            </tr>
+          `).join('')}
+          <tr class="total-row">
+            <td><strong>TOTAL</strong></td>
+            <td><strong>${rows.length.toLocaleString()}</strong></td>
+            <td class="qty-cell"><strong>${totalQty.toLocaleString()}</strong></td>
+            <td><strong>${uniqueProjects.size}</strong></td>
+            <td><strong>${uniquePOs.size}</strong></td>
+            <td><strong>${uniqueBOLs.size}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Build detailed breakdown by day
+  let bodyHtml = '<div class="detail-section"><div class="detail-title">Detailed Breakdown by Day</div>';
+  Object.keys(groups).sort().forEach(dateKey => {
     let dateTotal = 0;
     let dateLines = 0;
     Object.values(groups[dateKey]).forEach(proj => {
@@ -286,10 +409,9 @@ function buildInboundReportHtml_(params, reportData) {
       });
     });
 
-    bodyHtml += `<div class="lvl-date"><div class="lvl-date-h"><span class="date-icon">&#128197;</span> ${esc(dateKey)}<span class="date-summary">${dateLines} lines | ${dateTotal} units</span></div>`;
+    bodyHtml += `<div class="lvl-date"><div class="lvl-date-h"><span class="date-icon">&#128197;</span> ${esc(dateKey)}<span class="date-summary">${dateLines} lines | ${dateTotal.toLocaleString()} units</span></div>`;
     const projObj = groups[dateKey];
     Object.keys(projObj).sort().forEach(projKey => {
-      // Calculate project totals
       let projTotal = 0;
       let projLines = 0;
       Object.values(projObj[projKey]).forEach(po => {
@@ -299,7 +421,7 @@ function buildInboundReportHtml_(params, reportData) {
         });
       });
 
-      bodyHtml += `<div class="lvl-project"><div class="lvl-project-h"><span class="project-label">PROJECT</span> ${esc(projKey)}<span class="project-summary">${projLines} lines | ${projTotal} units</span></div>`;
+      bodyHtml += `<div class="lvl-project"><div class="lvl-project-h"><span class="project-label">PROJECT</span> ${esc(projKey)}<span class="project-summary">${projLines} lines | ${projTotal.toLocaleString()} units</span></div>`;
       const poObj = projObj[projKey];
       Object.keys(poObj).sort().forEach(poKey => {
         bodyHtml += `<div class="lvl-po"><div class="lvl-po-h"><span class="po-label">PO#</span> ${esc(poKey)}</div>`;
@@ -312,7 +434,7 @@ function buildInboundReportHtml_(params, reportData) {
             <div class="lvl-bol">
               <div class="lvl-bol-h">
                 <div><span class="bol-label">BOL</span> ${esc(bolKey)}</div>
-                <div class="bol-stats"><span class="stat-badge">${esc(items.length)} lines</span><span class="stat-badge qty-badge">${esc(bolTotal)} units</span></div>
+                <div class="bol-stats"><span class="stat-badge">${items.length} lines</span><span class="stat-badge qty-badge">${bolTotal.toLocaleString()} units</span></div>
               </div>
               <table>
                 <thead>
@@ -344,6 +466,7 @@ function buildInboundReportHtml_(params, reportData) {
     });
     bodyHtml += `</div>`;
   });
+  bodyHtml += '</div>';
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     @page { size: letter; margin: 0.5in; }
@@ -358,11 +481,21 @@ function buildInboundReportHtml_(params, reportData) {
     .date-range { font-size: 10pt; font-weight: 600; }
     .generated { font-size: 8pt; opacity: 0.8; margin-top: 4px; }
 
-    /* Summary Cards */
-    .summary-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .summary-card { flex: 1; min-width: 100px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center; }
-    .summary-card .value { font-size: 18pt; font-weight: 700; color: #1e40af; }
-    .summary-card .label { font-size: 8pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+    /* Summary Section */
+    .summary-section { margin-bottom: 24px; page-break-after: auto; }
+    .summary-title { font-size: 14pt; font-weight: 700; color: #1e40af; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #1e40af; }
+    .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    .summary-table th { text-align: center; font-size: 9pt; background: #1e40af; color: #fff; padding: 10px 8px; border: 1px solid #1e3a8a; font-weight: 600; text-transform: uppercase; }
+    .summary-table td { padding: 10px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 500; }
+    .summary-table .date-cell { font-weight: 600; color: #1e3a8a; text-align: left; padding-left: 12px; }
+    .summary-table .row-even td { background: #f8fafc; }
+    .summary-table .row-odd td { background: #ffffff; }
+    .summary-table .total-row td { background: #e0e7ff; border-top: 2px solid #1e40af; }
+    .summary-table .qty-cell { color: #166534; font-weight: 700; }
+
+    /* Detail Section */
+    .detail-section { margin-top: 20px; }
+    .detail-title { font-size: 14pt; font-weight: 700; color: #1e40af; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1e40af; }
 
     /* Date Level - Primary grouping */
     .lvl-date { margin-bottom: 20px; }
@@ -401,6 +534,7 @@ function buildInboundReportHtml_(params, reportData) {
     /* Print optimizations */
     @media print {
       .report-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .summary-table th, .summary-table .total-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .lvl-date-h, .lvl-project-h, .lvl-po-h, .lvl-bol-h, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style></head><body>
@@ -416,13 +550,7 @@ function buildInboundReportHtml_(params, reportData) {
       </div>
     </div>
   </div>
-  <div class="summary-bar">
-    <div class="summary-card"><div class="value">${rows.length}</div><div class="label">Total Lines</div></div>
-    <div class="summary-card"><div class="value">${totalQty.toLocaleString()}</div><div class="label">Total Units</div></div>
-    <div class="summary-card"><div class="value">${uniqueProjects.size}</div><div class="label">Projects</div></div>
-    <div class="summary-card"><div class="value">${uniquePOs.size}</div><div class="label">POs</div></div>
-    <div class="summary-card"><div class="value">${uniqueBOLs.size}</div><div class="label">BOLs</div></div>
-  </div>
+  ${summaryTableHtml}
   ${bodyHtml}
 </body></html>`;
 }
@@ -458,9 +586,71 @@ function buildOutboundReportHtml_(params, reportData) {
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  let bodyHtml = '';
+  // Build daily summary table data
+  const dailySummary = [];
   Object.keys(groups).sort().forEach(dateKey => {
-    // Calculate date totals
+    let dateTotal = 0;
+    let dateLines = 0;
+    const dateCompanies = new Set();
+    const dateTasks = new Set();
+    const dateOrders = new Set();
+    Object.keys(groups[dateKey]).forEach(company => {
+      dateCompanies.add(company);
+      Object.keys(groups[dateKey][company]).forEach(task => {
+        dateTasks.add(task);
+        const items = groups[dateKey][company][task];
+        dateLines += items.length;
+        items.forEach(x => {
+          dateTotal += Number(x.qty || 0) || 0;
+          if (x.orderNumber) dateOrders.add(x.orderNumber);
+        });
+      });
+    });
+    dailySummary.push({ date: dateKey, lines: dateLines, qty: dateTotal, companies: dateCompanies.size, tasks: dateTasks.size, orders: dateOrders.size });
+  });
+
+  // Build summary table HTML
+  let summaryTableHtml = `
+    <div class="summary-section">
+      <div class="summary-title">Daily Summary</div>
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Lines</th>
+            <th>Units</th>
+            <th>Companies</th>
+            <th>Tasks</th>
+            <th>Orders</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dailySummary.map((d, idx) => `
+            <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
+              <td class="date-cell">${esc(d.date)}</td>
+              <td>${d.lines.toLocaleString()}</td>
+              <td class="qty-cell">${d.qty.toLocaleString()}</td>
+              <td>${d.companies}</td>
+              <td>${d.tasks}</td>
+              <td>${d.orders}</td>
+            </tr>
+          `).join('')}
+          <tr class="total-row">
+            <td><strong>TOTAL</strong></td>
+            <td><strong>${rows.length.toLocaleString()}</strong></td>
+            <td class="qty-cell"><strong>${totalQty.toLocaleString()}</strong></td>
+            <td><strong>${uniqueCompanies.size}</strong></td>
+            <td><strong>${uniqueTasks.size}</strong></td>
+            <td><strong>${uniqueOrders.size}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Build detailed breakdown by day
+  let bodyHtml = '<div class="detail-section"><div class="detail-title">Detailed Breakdown by Day</div>';
+  Object.keys(groups).sort().forEach(dateKey => {
     let dateTotal = 0;
     let dateLines = 0;
     Object.values(groups[dateKey]).forEach(company => {
@@ -470,10 +660,9 @@ function buildOutboundReportHtml_(params, reportData) {
       });
     });
 
-    bodyHtml += `<div class="lvl-date"><div class="lvl-date-h"><span class="date-icon">&#128197;</span> ${esc(dateKey)}<span class="date-summary">${dateLines} lines | ${dateTotal} units</span></div>`;
+    bodyHtml += `<div class="lvl-date"><div class="lvl-date-h"><span class="date-icon">&#128197;</span> ${esc(dateKey)}<span class="date-summary">${dateLines} lines | ${dateTotal.toLocaleString()} units</span></div>`;
     const companyObj = groups[dateKey];
     Object.keys(companyObj).sort().forEach(companyKey => {
-      // Calculate company totals
       let companyTotal = 0;
       let companyLines = 0;
       Object.values(companyObj[companyKey]).forEach(items => {
@@ -481,7 +670,7 @@ function buildOutboundReportHtml_(params, reportData) {
         items.forEach(x => companyTotal += Number(x.qty || 0) || 0);
       });
 
-      bodyHtml += `<div class="lvl-company"><div class="lvl-company-h"><span class="company-label">COMPANY</span> ${esc(companyKey)}<span class="company-summary">${companyLines} lines | ${companyTotal} units</span></div>`;
+      bodyHtml += `<div class="lvl-company"><div class="lvl-company-h"><span class="company-label">COMPANY</span> ${esc(companyKey)}<span class="company-summary">${companyLines} lines | ${companyTotal.toLocaleString()} units</span></div>`;
       const taskObj = companyObj[companyKey];
       Object.keys(taskObj).sort().forEach(taskKey => {
         const items = taskObj[taskKey];
@@ -491,7 +680,7 @@ function buildOutboundReportHtml_(params, reportData) {
           <div class="lvl-task">
             <div class="lvl-task-h">
               <div><span class="task-label">TASK#</span> ${esc(taskKey)}</div>
-              <div class="task-stats"><span class="stat-badge">${esc(items.length)} lines</span><span class="stat-badge qty-badge">${esc(taskTotal)} units</span></div>
+              <div class="task-stats"><span class="stat-badge">${items.length} lines</span><span class="stat-badge qty-badge">${taskTotal.toLocaleString()} units</span></div>
             </div>
             <table>
               <thead>
@@ -519,6 +708,7 @@ function buildOutboundReportHtml_(params, reportData) {
     });
     bodyHtml += `</div>`;
   });
+  bodyHtml += '</div>';
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     @page { size: letter; margin: 0.5in; }
@@ -533,11 +723,21 @@ function buildOutboundReportHtml_(params, reportData) {
     .date-range { font-size: 10pt; font-weight: 600; }
     .generated { font-size: 8pt; opacity: 0.8; margin-top: 4px; }
 
-    /* Summary Cards */
-    .summary-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .summary-card { flex: 1; min-width: 100px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; text-align: center; }
-    .summary-card .value { font-size: 18pt; font-weight: 700; color: #065f46; }
-    .summary-card .label { font-size: 8pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+    /* Summary Section */
+    .summary-section { margin-bottom: 24px; page-break-after: auto; }
+    .summary-title { font-size: 14pt; font-weight: 700; color: #065f46; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #065f46; }
+    .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    .summary-table th { text-align: center; font-size: 9pt; background: #065f46; color: #fff; padding: 10px 8px; border: 1px solid #064e3b; font-weight: 600; text-transform: uppercase; }
+    .summary-table td { padding: 10px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 500; }
+    .summary-table .date-cell { font-weight: 600; color: #064e3b; text-align: left; padding-left: 12px; }
+    .summary-table .row-even td { background: #f0fdf4; }
+    .summary-table .row-odd td { background: #ffffff; }
+    .summary-table .total-row td { background: #d1fae5; border-top: 2px solid #065f46; }
+    .summary-table .qty-cell { color: #c2410c; font-weight: 700; }
+
+    /* Detail Section */
+    .detail-section { margin-top: 20px; }
+    .detail-title { font-size: 14pt; font-weight: 700; color: #065f46; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #065f46; }
 
     /* Date Level - Primary grouping */
     .lvl-date { margin-bottom: 20px; }
@@ -571,6 +771,7 @@ function buildOutboundReportHtml_(params, reportData) {
     /* Print optimizations */
     @media print {
       .report-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .summary-table th, .summary-table .total-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .lvl-date-h, .lvl-company-h, .lvl-task-h, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style></head><body>
@@ -586,13 +787,7 @@ function buildOutboundReportHtml_(params, reportData) {
       </div>
     </div>
   </div>
-  <div class="summary-bar">
-    <div class="summary-card"><div class="value">${rows.length}</div><div class="label">Total Lines</div></div>
-    <div class="summary-card"><div class="value">${totalQty.toLocaleString()}</div><div class="label">Total Units</div></div>
-    <div class="summary-card"><div class="value">${uniqueCompanies.size}</div><div class="label">Companies</div></div>
-    <div class="summary-card"><div class="value">${uniqueTasks.size}</div><div class="label">Tasks</div></div>
-    <div class="summary-card"><div class="value">${uniqueOrders.size}</div><div class="label">Orders</div></div>
-  </div>
+  ${summaryTableHtml}
   ${bodyHtml}
 </body></html>`;
 }

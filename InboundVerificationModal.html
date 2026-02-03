@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <?!= include('UniversalStyles'); ?>
+    <style>
+        .step-container {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .step-container.active {
+            display: block;
+        }
+
+        /* Verification Status Cards */
+        .status-card {
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            margin-bottom: var(--spacing-lg);
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-card.match {
+            border-left: 5px solid var(--success);
+            background: linear-gradient(to right, rgba(16, 185, 129, 0.05), transparent);
+        }
+
+        .status-card.variance {
+            border-left: 5px solid var(--danger);
+            background: linear-gradient(to right, rgba(239, 68, 68, 0.05), transparent);
+        }
+
+        .qty-display {
+            text-align: center;
+        }
+
+        .qty-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .qty-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .variance-val {
+            color: var(--danger);
+        }
+
+        .match-val {
+            color: var(--success);
+        }
+
+        /* Box Editor */
+        .box-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: var(--spacing-md);
+        }
+
+        .box-row {
+            display: flex;
+            align-items: center;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .box-row:last-child {
+            border-bottom: none;
+        }
+
+        .box-id {
+            flex: 1;
+            font-family: monospace;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .box-input {
+            width: 100px;
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="modal-container">
+        <!-- STEP 1: SCAN SKID -->
+        <div id="step1" class="step-container active">
+            <div class="form-section">
+                <h2 class="form-section-title">Step 1: Scan Skid</h2>
+                <div class="form-group">
+                    <label class="form-label">Scan Skid ID</label>
+                    <div class="input-with-icon">
+                        <input type="text" id="scanSkidId" class="form-input" placeholder="e.g. SKD-12345678" autofocus
+                            onkeydown="handleScan(event)">
+                        <button class="btn btn-primary" onclick="lookupSkid()">Find</button>
+                    </div>
+                    <div class="form-hint">Scan the barcode on the gaylord/skid label.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 2: VERIFY CONTENTS -->
+        <div id="step2" class="step-container">
+            <div class="form-section">
+                <div class="status-card" id="infoCard">
+                    <div>
+                        <div class="qty-label">FBPN</div>
+                        <div class="qty-value" style="font-size: 1.5rem;" id="dispFbpn">--</div>
+                        <div style="font-size: 0.9rem; color: var(--text-secondary);" id="dispDesc">--</div>
+                    </div>
+                    <div>
+                        <div class="qty-label">Expected Qty</div>
+                        <div class="qty-value" id="dispExpQty">0</div>
+                    </div>
+                    <div>
+                        <div class="qty-label">Project</div>
+                        <div class="qty-value" style="font-size: 1.2rem;" id="dispProject">--</div>
+                    </div>
+                </div>
+
+                <h2 class="form-section-title">Step 2: Box Content Breakdown</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Qty Per Box</label>
+                        <input type="number" id="qtyPerBox" class="form-input" onchange="enableBoxGen()">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Number of Boxes</label>
+                        <input type="number" id="numBoxes" class="form-input" onchange="enableBoxGen()">
+                    </div>
+                    <div class="form-group" style="display:flex; align-items:flex-end;">
+                        <button class="btn btn-secondary" onclick="generateBoxRows()" id="btnGenBoxes"
+                            disabled>Generate</button>
+                    </div>
+                </div>
+
+                <div id="boxEditorArea" style="display:none;">
+                    <div class="box-list" id="boxList">
+                        <!-- Generated rows go here -->
+                    </div>
+
+                    <div class="form-row"
+                        style="margin-top: var(--spacing-lg); justify-content: flex-end; align-items: center;">
+                        <div style="margin-right: var(--spacing-lg); text-align: right;">
+                            <div class="qty-label">Total Verified Qty</div>
+                            <div class="qty-value" id="totalVerified">0</div>
+                        </div>
+                        <div style="margin-right: var(--spacing-lg); text-align: right;">
+                            <div class="qty-label">Variance</div>
+                            <div class="qty-value" id="varianceDisplay">0</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width" style="margin-top: var(--spacing-md);">
+                        <label class="form-label">Notes</label>
+                        <textarea id="notes" class="form-input" rows="2"
+                            placeholder="Explain any variance..."></textarea>
+                    </div>
+
+                    <div class="modal-footer" style="padding: 0; margin-top: var(--spacing-lg);">
+                        <button class="btn btn-outline-danger" onclick="reset()">Cancel</button>
+                        <button class="btn btn-primary" onclick="submitVerification()">
+                            Verify & Print Labels
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LOADING OVERLAY -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loadingText">Processing...</div>
+        </div>
+
+    </div>
+
+    <script>
+        let currentSkidData = null;
+        let currentBoxes = [];
+
+        function handleScan(e) {
+            if (e.key === 'Enter') {
+                lookupSkid();
+            }
+        }
+
+        function lookupSkid() {
+            const skidId = document.getElementById('scanSkidId').value.trim();
+            if (!skidId) return showAlert("Please enter a Skid ID", "warning");
+
+            showLoading(true, "Fetching Skid Data...");
+            google.script.run
+                .withSuccessHandler(onSkidLoaded)
+                .withFailureHandler(onFailure)
+                .getVerificationSkidData(skidId);
+        }
+
+        function onSkidLoaded(data) {
+            showLoading(false);
+            currentSkidData = data;
+
+            // Populate Info
+            document.getElementById('dispFbpn').textContent = data.fbpn || 'N/A';
+            document.getElementById('dispDesc').textContent = data.manufacturer || '';
+            document.getElementById('dispExpQty').textContent = data.expectedQty;
+            document.getElementById('dispProject').textContent = data.project || 'N/A';
+
+            // Switch Steps
+            document.getElementById('step1').classList.remove('active');
+            document.getElementById('step2').classList.add('active');
+
+            // Auto-focus box entry
+            document.getElementById('qtyPerBox').focus();
+        }
+
+        function enableBoxGen() {
+            const q = document.getElementById('qtyPerBox').value;
+            const n = document.getElementById('numBoxes').value;
+            document.getElementById('btnGenBoxes').disabled = !(q && n);
+        }
+
+        function generateBoxRows() {
+            const qtyPerBox = parseFloat(document.getElementById('qtyPerBox').value);
+            const numBoxes = parseInt(document.getElementById('numBoxes').value);
+
+            if (!qtyPerBox || !numBoxes) return;
+
+            const list = document.getElementById('boxList');
+            list.innerHTML = '';
+            currentBoxes = [];
+
+            for (let i = 1; i <= numBoxes; i++) {
+                const seq = String(i).padStart(2, '0');
+                const containerId = `${currentSkidData.skidId}-${seq}`;
+
+                currentBoxes.push({
+                    id: containerId,
+                    qty: qtyPerBox
+                });
+
+                const row = document.createElement('div');
+                row.className = 'box-row';
+                row.innerHTML = `
+           <div class="box-id">${containerId}</div>
+           <input type="number" class="box-input" value="${qtyPerBox}" onchange="updateTotal(this, ${i - 1})">
+        `;
+                list.appendChild(row);
+            }
+
+            document.getElementById('boxEditorArea').style.display = 'block';
+            recalcTotal();
+        }
+
+        function updateTotal(el, idx) {
+            const val = parseFloat(el.value) || 0;
+            currentBoxes[idx].qty = val;
+            recalcTotal();
+        }
+
+        function recalcTotal() {
+            const total = currentBoxes.reduce((sum, b) => sum + b.qty, 0);
+            const variance = total - currentSkidData.expectedQty;
+
+            document.getElementById('totalVerified').textContent = total;
+
+            const vEl = document.getElementById('varianceDisplay');
+            vEl.textContent = (variance > 0 ? '+' : '') + variance;
+
+            vEl.className = 'qty-value ' + (variance === 0 ? 'match-val' : 'variance-val');
+
+            // Update card border
+            const card = document.getElementById('infoCard');
+            card.className = 'status-card ' + (variance === 0 ? 'match' : 'variance');
+        }
+
+        function submitVerification() {
+            if (!currentSkidData) return;
+
+            const total = currentBoxes.reduce((sum, b) => sum + b.qty, 0);
+            const notes = document.getElementById('notes').value;
+
+            const payload = {
+                skidId: currentSkidData.skidId,
+                fbpn: currentSkidData.fbpn,
+                project: currentSkidData.project,
+                expectedQty: currentSkidData.expectedQty,
+                actualQty: total,
+                boxCount: currentBoxes.length,
+                notes: notes,
+                generateLabels: true, // Always verify & print
+                labelsPrinted: true,
+                boxes: currentBoxes.map(b => ({
+                    skidId: currentSkidData.skidId,
+                    containerId: b.id,
+                    fbpn: currentSkidData.fbpn,
+                    manufacturer: currentSkidData.manufacturer,
+                    project: currentSkidData.project,
+                    pushNumber: currentSkidData.pushNumber,
+                    qty: b.qty,
+                    // uom: 'EA' // Default
+                }))
+            };
+
+            showLoading(true, "Submitting Verification...");
+            google.script.run
+                .withSuccessHandler(onSubmissionSuccess)
+                .withFailureHandler(onFailure)
+                .submitVerification_backend(payload);
+        }
+
+        function onSubmissionSuccess(res) {
+            showLoading(false);
+            if (!res.success) {
+                showAlert("Error: " + (res.message || "Unknown error"), "danger");
+                return;
+            }
+
+            let msg = `Verification Complete! Status: ${res.status}`;
+            if (res.labelUrl) {
+                msg += `<br><a href="${res.labelUrl}" target="_blank" class="btn btn-sm btn-success" style="margin-top:10px;">Download Labels</a>`;
+                window.open(res.labelUrl, '_blank');
+            }
+
+            showAlert(msg, res.status === 'MATCH' ? 'success' : 'warning', 10000); // Verify and show status
+
+            // Reset view after short delay or manual
+            setTimeout(() => {
+                if (confirm("Process next skid?")) reset();
+            }, 2000);
+        }
+
+        function onFailure(e) {
+            showLoading(false);
+            showAlert("Error: " + e.message, "danger");
+        }
+
+        function reset() {
+            document.getElementById('step1').classList.add('active');
+            document.getElementById('step2').classList.remove('active');
+            document.getElementById('scanSkidId').value = '';
+            document.getElementById('boxEditorArea').style.display = 'none';
+            document.getElementById('scanSkidId').focus();
+            currentSkidData = null;
+            currentBoxes = [];
+        }
+
+        // Helper for Alert (needs to match UniversalStyles logic/HTML structure if standard alert helper exists)
+        // Assuming universal styles might have a generic showAlert or we inject one.
+        // We'll use the one from UniversalStyles if available, else fallback.
+        function showAlert(msg, type, duration) {
+            // UniversalStyles usually provides this. If not, minimal shim:
+            if (typeof window.showAlert === 'function') {
+                window.showAlert(msg, type, duration);
+            } else {
+                alert(msg);
+            }
+        }
+
+        function showLoading(show, txt) {
+            const el = document.getElementById('loadingOverlay');
+            const t = document.getElementById('loadingText');
+            if (t) t.textContent = txt;
+            if (show) el.classList.add('active');
+            else el.classList.remove('active');
+        }
+    </script>
+
+</body>
+
+</html>

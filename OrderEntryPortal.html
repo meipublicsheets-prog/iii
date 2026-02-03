@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <?!= include('UniversalStyles'); ?>
+  <style>
+    /* Compact Search Section */
+    .search-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .search-row .form-input {
+      flex: 1;
+    }
+    
+    /* Results Table */
+    .results-container {
+      max-height: 180px;
+      overflow-y: auto;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      margin-bottom: 16px;
+    }
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .results-table th {
+      background: var(--bg-element);
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      position: sticky;
+      top: 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .results-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-main);
+    }
+    .results-table tr:hover {
+      background: var(--primary-light);
+      cursor: pointer;
+    }
+    .results-table .fbpn-cell {
+      font-weight: 600;
+      color: var(--primary);
+    }
+    
+    /* Cart Table */
+    .cart-container {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+    }
+    .cart-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .cart-table th {
+      background: var(--bg-element);
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      position: sticky;
+      top: 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .cart-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .cart-table .qty-input {
+      width: 60px;
+      padding: 4px 6px;
+      text-align: center;
+    }
+    .cart-table .btn-remove {
+      padding: 2px 8px;
+      font-size: 0.75rem;
+    }
+    
+    /* Empty State */
+    .empty-state {
+      padding: 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    
+    /* Stats Bar */
+    .stats-bar {
+      display: flex;
+      gap: 16px;
+      padding: 10px 12px;
+      background: var(--bg-element);
+      border-radius: var(--radius-sm);
+      margin-top: 12px;
+    }
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+    .stat-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+  </style>
+  <script>
+    let itemMasterData = [];
+    let cart = [];
+    
+    // =========================================================================
+    // PAGE LOAD
+    // =========================================================================
+    window.onload = function() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('nbdDate').value = today;
+      
+      loadDropdowns();
+      loadItemMaster();
+    };
+    
+    function loadDropdowns() {
+      google.script.run
+        .withSuccessHandler(function(companies) {
+          const select = document.getElementById('company');
+          const extras = ['IBOS', 'Turner', 'DirectLine'];
+          const allCompanies = Array.from(new Set([...companies, ...extras])).sort();
+          allCompanies.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            select.appendChild(opt);
+          });
+        })
+        .getCompanies();
+        
+      google.script.run
+        .withSuccessHandler(function(projects) {
+          const select = document.getElementById('project');
+          const extras = ['LCO 1', 'LCO 2'];
+          const allProjects = Array.from(new Set([...projects, ...extras])).sort();
+          allProjects.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            select.appendChild(opt);
+          });
+        })
+        .getProjects();
+    }
+    
+    function loadItemMaster() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          itemMasterData = result.items || [];
+        })
+        .withFailureHandler(function(err) {
+          console.error('Failed to load Item Master:', err);
+        })
+        .getItemMasterForPortal();
+    }
+    
+    // =========================================================================
+    // SEARCH
+    // =========================================================================
+    function searchItems() {
+      const query = document.getElementById('searchInput').value.trim().toLowerCase();
+      const tbody = document.getElementById('resultsBody');
+      
+      if (!query || query.length < 2) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Enter at least 2 characters to search</td></tr>';
+        return;
+      }
+      
+      const matches = itemMasterData.filter(item => 
+        (item.fbpn && item.fbpn.toLowerCase().includes(query)) ||
+        (item.description && item.description.toLowerCase().includes(query)) ||
+        (item.manufacturer && item.manufacturer.toLowerCase().includes(query))
+      ).slice(0, 50);
+      
+      if (matches.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No items found</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = matches.map(item => `
+        <tr onclick="addToCart('${escapeHtml(item.fbpn)}', '${escapeHtml(item.manufacturer)}', '${escapeHtml(item.description)}')">
+          <td class="fbpn-cell">${item.fbpn}</td>
+          <td>${item.manufacturer || '-'}</td>
+          <td>${item.description || '-'}</td>
+          <td style="text-align:center;">
+            <button class="btn btn-primary btn-small" style="padding:2px 8px; font-size:0.75rem;">Add</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+    
+    function handleSearchKey(e) {
+      if (e.key === 'Enter') searchItems();
+    }
+    
+    // =========================================================================
+    // CART MANAGEMENT
+    // =========================================================================
+    function addToCart(fbpn, manufacturer, description) {
+      const existing = cart.find(i => i.fbpn === fbpn && i.manufacturer === manufacturer);
+      if (existing) {
+        existing.qty += 1;
+      } else {
+        cart.push({ fbpn, manufacturer, description, qty: 1 });
+      }
+      renderCart();
+    }
+    
+    function updateQty(index, value) {
+      const qty = parseInt(value) || 0;
+      if (qty <= 0) {
+        cart.splice(index, 1);
+      } else {
+        cart[index].qty = qty;
+      }
+      renderCart();
+    }
+    
+    function removeFromCart(index) {
+      cart.splice(index, 1);
+      renderCart();
+    }
+    
+    function renderCart() {
+      const tbody = document.getElementById('cartBody');
+      const countEl = document.getElementById('cartCount');
+      const totalEl = document.getElementById('cartTotal');
+      
+      if (cart.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No items in cart</td></tr>';
+        countEl.textContent = '0';
+        totalEl.textContent = '0';
+        return;
+      }
+      
+      const totalQty = cart.reduce((sum, i) => sum + i.qty, 0);
+      countEl.textContent = cart.length;
+      totalEl.textContent = totalQty;
+      
+      tbody.innerHTML = cart.map((item, idx) => `
+        <tr>
+          <td class="fbpn-cell">${item.fbpn}</td>
+          <td>${item.manufacturer || '-'}</td>
+          <td>${item.description || '-'}</td>
+          <td>
+            <input type="number" class="form-input qty-input" value="${item.qty}" min="1"
+              onchange="updateQty(${idx}, this.value)">
+          </td>
+          <td>
+            <button class="btn btn-danger btn-remove" onclick="removeFromCart(${idx})">X</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+    
+    // =========================================================================
+    // FORM VALIDATION & SUBMISSION
+    // =========================================================================
+    function validateForm() {
+      const required = ['nbdDate', 'orderTitle', 'taskNumber', 'project', 'company', 'deliveryLocation'];
+      let isValid = true;
+      
+      required.forEach(fieldId => {
+        const input = document.getElementById(fieldId);
+        if (!input.value.trim()) {
+          input.style.borderColor = 'var(--danger)';
+          isValid = false;
+        } else {
+          input.style.borderColor = 'var(--border-color)';
+        }
+      });
+      
+      if (cart.length === 0) {
+        showAlert('Please add items to the cart before submitting', 'danger');
+        isValid = false;
+      }
+      
+      return isValid;
+    }
+    
+    function submitOrder() {
+      if (!validateForm()) return;
+      
+      showLoading(true, 'Processing order...');
+      
+      // Convert cart to parsedItems format expected by backend
+      const parsedItems = cart.map(item => ({
+        fbpn: item.fbpn,
+        description: item.description || '',
+        qty: item.qty
+      }));
+      
+      const orderData = {
+        nbdDate: document.getElementById('nbdDate').value,
+        orderTitle: document.getElementById('orderTitle').value,
+        taskNumber: document.getElementById('taskNumber').value,
+        project: document.getElementById('project').value,
+        company: document.getElementById('company').value,
+        deliveryLocation: document.getElementById('deliveryLocation').value,
+        items: parsedItems
+      };
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showLoading(false);
+          if (result.success) {
+            showAlert(`Order ${result.orderId} created!\nTotal: ${result.totalItems} | In Stock: ${result.inStockCount} | Backorder: ${result.backorderedCount}`, 'success');
+            setTimeout(() => google.script.host.close(), 3000);
+          } else {
+            showAlert('Error: ' + result.message, 'danger');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showLoading(false);
+          showAlert('Error: ' + error.message, 'danger');
+        })
+        .processCustomerOrder(orderData);
+    }
+    
+    // =========================================================================
+    // UTILITIES
+    // =========================================================================
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+    
+    function showAlert(message, type) {
+      const alertDiv = document.createElement('div');
+      alertDiv.className = `alert alert-${type}`;
+      alertDiv.style.whiteSpace = 'pre-line';
+      alertDiv.textContent = message;
+      
+      const container = document.querySelector('.modal-container');
+      container.insertBefore(alertDiv, container.firstChild);
+      
+      setTimeout(() => alertDiv.remove(), 5000);
+    }
+    
+    function showLoading(show, message = 'Processing...') {
+      const overlay = document.getElementById('loadingOverlay');
+      const text = document.getElementById('loadingText');
+      if (text) text.textContent = message;
+      if (show) overlay.classList.add('active');
+      else overlay.classList.remove('active');
+    }
+  </script>
+</head>
+
+<body>
+  <div class="modal-container">
+    <div style="padding: 20px;">
+      <!-- Order Information -->
+      <div class="form-section">
+        <h2 class="form-section-title">Order Information</h2>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label required">Need By Date</label>
+            <input type="date" id="nbdDate" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Task Number</label>
+            <input type="text" id="taskNumber" class="form-input" placeholder="TSK-12345">
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label required">Order Title</label>
+          <input type="text" id="orderTitle" class="form-input" placeholder="Brief description">
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label required">Company</label>
+            <select id="company" class="form-select">
+              <option value="">Select Company</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Project</label>
+            <select id="project" class="form-select">
+              <option value="">Select Project</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label required">Delivery Location</label>
+          <input type="text" id="deliveryLocation" class="form-input" placeholder="Delivery address">
+        </div>
+      </div>
+
+      <!-- Item Search -->
+      <div class="form-section">
+        <h2 class="form-section-title">Search Items</h2>
+        
+        <div class="search-row">
+          <input type="text" id="searchInput" class="form-input" placeholder="Search by FBPN, Description, or Manufacturer..." onkeydown="handleSearchKey(event)">
+          <button class="btn btn-primary" onclick="searchItems()">Search</button>
+        </div>
+        
+        <div class="results-container">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>FBPN</th>
+                <th>Manufacturer</th>
+                <th>Description</th>
+                <th style="width:60px;"></th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr><td colspan="4" class="empty-state">Search for items above</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Cart -->
+      <div class="form-section">
+        <h2 class="form-section-title">Order Cart</h2>
+        
+        <div class="cart-container">
+          <table class="cart-table">
+            <thead>
+              <tr>
+                <th>FBPN</th>
+                <th>Manufacturer</th>
+                <th>Description</th>
+                <th style="width:70px;">Qty</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="cartBody">
+              <tr><td colspan="5" class="empty-state">No items in cart</td></tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="stats-bar">
+          <div class="stat-item">
+            <span class="stat-label">Line Items:</span>
+            <span class="stat-value" id="cartCount">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Total Qty:</span>
+            <span class="stat-value" id="cartTotal">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="button-group">
+        <button class="btn btn-secondary" onclick="google.script.host.close()">Cancel</button>
+        <button class="btn btn-success btn-large" onclick="submitOrder()">Submit Order</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div id="loadingText" class="loading-text">Processing...</div>
+  </div>
+</body>
+
+</html>

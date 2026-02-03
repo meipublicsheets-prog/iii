@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <?!= include('UniversalStyles'); ?>
+</head>
+
+<body>
+    <div class="loading-overlay" id="loading">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingText">Saving...</div>
+    </div>
+
+    <div class="modal-container" style="max-width: 500px;">
+        <div class="modal-header">
+            <h1>Add Customer PO / Project</h1>
+            <p>Add a new PO Number and Project to PO_Master</p>
+        </div>
+
+        <div style="padding: 14px;">
+            <div class="form-section">
+                <div class="form-group">
+                    <label class="form-label required">Customer PO Number</label>
+                    <input type="text" id="customerPO" class="form-input" placeholder="e.g., PO-2026-001234">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required">Project</label>
+                    <input type="text" id="project" class="form-input" placeholder="e.g., LCO 1">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Customer/Company Name</label>
+                    <input type="text" id="customer" class="form-input" placeholder="Customer or company name">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea id="notes" class="form-input" rows="2" placeholder="Optional notes"></textarea>
+                </div>
+            </div>
+
+            <!-- Recent POs Section -->
+            <div class="form-section" style="max-height: 200px; overflow-y: auto;">
+                <h3 class="form-section-title" style="font-size: 0.85rem;">Recent PO Numbers</h3>
+                <table class="data-table" style="font-size: 0.8rem;">
+                    <thead>
+                        <tr>
+                            <th>Customer PO</th>
+                            <th>Project</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentPOs">
+                        <tr>
+                            <td colspan="2" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="resultBox" class="alert alert-success" style="display: none;">
+                <span id="resultMsg"></span>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="google.script.host.close()">Cancel</button>
+                <button class="btn btn-primary" onclick="savePO()">Add PO / Project</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        window.onload = function () {
+            loadRecentPOs();
+        };
+
+        function showLoading(on, msg) {
+            $('loading').classList.toggle('active', !!on);
+            if (msg) $('loadingText').textContent = msg;
+        }
+
+        function showAlert(msg, type) {
+            const div = document.createElement('div');
+            div.className = 'alert alert-' + type;
+            div.textContent = msg;
+            const container = document.querySelector('.form-section');
+            container.parentNode.insertBefore(div, container);
+            setTimeout(() => div.remove(), 4000);
+        }
+
+        function loadRecentPOs() {
+            google.script.run
+                .withSuccessHandler(function (data) {
+                    const tbody = $('recentPOs');
+                    if (!data || !data.length) {
+                        tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; color: var(--text-muted);">No POs found</td></tr>';
+                        return;
+                    }
+                    // Show last 10
+                    const recent = data.slice(-10).reverse();
+                    tbody.innerHTML = recent.map(row => `
+            <tr>
+              <td><strong>${row.po || '-'}</strong></td>
+              <td>${row.project || '-'}</td>
+            </tr>
+          `).join('');
+                })
+                .withFailureHandler(function () {
+                    $('recentPOs').innerHTML = '<tr><td colspan="2" style="color: var(--danger);">Failed to load</td></tr>';
+                })
+                .getRecentPOs();
+        }
+
+        function savePO() {
+            const customerPO = $('customerPO').value.trim();
+            const project = $('project').value.trim();
+
+            if (!customerPO) {
+                showAlert('Customer PO Number is required', 'danger');
+                return;
+            }
+            if (!project) {
+                showAlert('Project is required', 'danger');
+                return;
+            }
+
+            const data = {
+                customerPO: customerPO,
+                project: project,
+                customer: $('customer').value.trim(),
+                notes: $('notes').value.trim()
+            };
+
+            showLoading(true, 'Adding PO...');
+
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    showLoading(false);
+                    if (result && result.success) {
+                        $('resultBox').style.display = 'block';
+                        $('resultMsg').textContent = 'PO added successfully! Row: ' + result.row;
+                        // Clear form
+                        $('customerPO').value = '';
+                        $('project').value = '';
+                        $('customer').value = '';
+                        $('notes').value = '';
+                        // Refresh list
+                        loadRecentPOs();
+                    } else {
+                        showAlert('Error: ' + (result ? result.message : 'Unknown error'), 'danger');
+                    }
+                })
+                .withFailureHandler(function (err) {
+                    showLoading(false);
+                    showAlert('Error: ' + (err.message || err), 'danger');
+                })
+                .addPOToPOMaster(data);
+        }
+    </script>
+</body>
+
+</html>

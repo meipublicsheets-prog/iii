@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('UniversalStyles'); ?>
+  <style>
+    /* Stats Bar Compact */
+    .stats-bar {
+      display: flex;
+      gap: 12px;
+      padding: 8px 12px;
+      background: var(--bg-element);
+      border-radius: var(--radius-md);
+      margin-top: 10px;
+      align-items: center;
+    }
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+    }
+    .stat-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    
+    /* Items Table Wrapper */
+    .items-table-wrap {
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 10px;
+    }
+    
+    /* Skid Card Compact */
+    .skid-card {
+      background: #fff;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .skid-card-header {
+      background: var(--bg-element);
+      padding: 6px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .skid-body {
+      padding: 10px;
+    }
+    .skid-items-list {
+      list-style: none;
+      margin-top: 8px;
+    }
+    .skid-items-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 0.85rem;
+    }
+    .skid-items-list li:last-child { border-bottom: none; }
+  </style>
+  <script>
+    let currentTab = 1;
+    let parsedItems = [];
+    let skidsData = [];
+
+    window.onload = function() {
+      showTab(1);
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('date').value = today;
+      loadTaskNumbers();
+    };
+
+    function loadTaskNumbers() {
+      google.script.run
+        .withSuccessHandler(function(taskNumbers) {
+          const select = document.getElementById('taskNumber');
+          select.innerHTML = '<option value="">Select Task...</option>';
+          (taskNumbers || []).forEach(task => {
+            const option = document.createElement('option');
+            option.value = task;
+            option.textContent = task;
+            select.appendChild(option);
+          });
+        })
+        .withFailureHandler(err => showAlert(err.message, 'danger'))
+        .getTaskNumbers();
+    }
+
+    function onTaskNumberChange() {
+      const taskNumber = document.getElementById('taskNumber').value;
+      if (!taskNumber) {
+        parsedItems = [];
+        renderItemsTable();
+        return;
+      }
+      showLoading(true, 'Loading Order...');
+      google.script.run.withSuccessHandler(data => {
+        showLoading(false);
+        const header = data.header || data;
+        
+        // Auto-fill fields
+        ['orderNumber', 'orderTitle', 'company', 'project', 'deliverTo', 'name', 'phoneNumber'].forEach(id => {
+            const val = header[id] || header[id.charAt(0).toUpperCase() + id.slice(1)] || header['Order_ID'] || '';
+            const el = document.getElementById(id);
+            if(el) el.value = val;
+        });
+        
+        // Process items
+        const items = data.items || header.items || [];
+        parsedItems = items.map(it => ({
+            fbpn: it.fbpn || it.FBPN,
+            description: it.description || it.Description || '',
+            qtyRequested: Number(it.qtyRequested || it.Qty_Requested || 0),
+            selected: true
+        }));
+        
+        renderItemsTable();
+        updateStats();
+      }).withFailureHandler(err => {
+          showLoading(false);
+          showAlert(err.message, 'danger');
+      }).getOrderByTaskNumber(taskNumber);
+    }
+
+    // --- Tab Logic ---
+    function showTab(n) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+        document.getElementById('tab'+n).classList.add('active');
+        document.querySelectorAll('.tab-button')[n-1].classList.add('active');
+        currentTab = n;
+        
+        const prev = document.getElementById('prevBtn');
+        const next = document.getElementById('nextBtn');
+        prev.style.display = n === 1 ? 'none' : 'inline-flex';
+        next.style.display = n === 3 ? 'none' : 'inline-flex';
+    }
+
+    function nextTab() {
+        if(currentTab === 1) {
+            if(!document.getElementById('taskNumber').value) return showAlert('Select a Task Number', 'warning');
+            if(parsedItems.length === 0) return showAlert('No items loaded', 'warning');
+        }
+        if(currentTab === 2) {
+             if(skidsData.length === 0 || !skidsData.some(s => s.items.length > 0)) return showAlert('Configure at least one skid with items', 'warning');
+        }
+        showTab(currentTab + 1);
+        if(currentTab === 3) populateSummary();
+    }
+
+    function prevTab() { showTab(currentTab - 1); }
+
+    // --- Renderers ---
+    function renderItemsTable() {
+        const tbody = document.getElementById('itemsTableBody');
+        tbody.innerHTML = parsedItems.length ? '' : '<tr><td colspan="4" style="text-align:center; padding:20px; color:#999;">Select a Task Number to load items.</td></tr>';
+        
+        parsedItems.forEach((item, i) => {
+            const row = tbody.insertRow();
+            row.innerHTML = `
+                <td><input type="checkbox" ${item.selected ? 'checked' : ''} onchange="toggleItem(${i})"></td>
+                <td style="font-weight:600; color:#2563eb;">${item.fbpn}</td>
+                <td>${item.description}</td>
+                <td style="text-align:center;">${item.qtyRequested}</td>
+            `;
+        });
+    }
+
+    function toggleItem(i) {
+        parsedItems[i].selected = !parsedItems[i].selected;
+        updateStats();
+    }
+
+    function updateStats() {
+        const sel = parsedItems.filter(i => i.selected);
+        document.getElementById('statCount').textContent = sel.length;
+        document.getElementById('statQty').textContent = sel.reduce((a,b) => a + b.qtyRequested, 0);
+    }
+
+    // --- Skid Logic ---
+    function buildSkidsData() {
+        const count = parseInt(document.getElementById('skidCount').value) || 0;
+        skidsData = Array.from({length: count}, (_, i) => ({ skidNumber: i+1, items: [] }));
+        renderSkidBuilder();
+    }
+
+    function renderSkidBuilder() {
+        const container = document.getElementById('skidsContainer');
+        container.innerHTML = skidsData.length ? '' : '<div style="text-align:center; padding:20px; color:#999;">Set number of skids to begin.</div>';
+        
+        skidsData.forEach((skid, idx) => {
+            const div = document.createElement('div');
+            div.className = 'skid-card';
+            div.innerHTML = `
+                <div class="skid-card-header">
+                    <span style="font-weight:700;">Skid #${skid.skidNumber}</span>
+                    <button class="btn btn-small btn-secondary" onclick="duplicateSkid(${idx})">Duplicate Down</button>
+                </div>
+                <div class="skid-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <select class="form-select" onchange="addItemToSkid(${idx}, this.value); this.value='';">
+                                <option value="">+ Add Item...</option>
+                                ${getItemOptions(idx)}
+                            </select>
+                        </div>
+                    </div>
+                    <ul class="skid-items-list">
+                        ${skid.items.map((item, itemIdx) => `
+                            <li>
+                                <div style="flex:1;">
+                                    <strong>${item.fbpn}</strong>
+                                    <div style="font-size:0.75rem; color:#666;">Max: ${item.maxQty}</div>
+                                </div>
+                                <div style="display:flex; gap:4px;">
+                                    <input type="number" class="form-input" style="width:70px; padding:2px 6px; height:28px;" value="${item.qtyOnSkid}" onchange="updateSkidQty(${idx}, ${itemIdx}, this.value)">
+                                    <button class="btn btn-small btn-danger" onclick="removeSkidItem(${idx}, ${itemIdx})">✕</button>
+                                </div>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function getItemOptions(skidIdx) {
+        const sel = parsedItems.filter(i => i.selected);
+        return sel.map((item, i) => {
+            let used = 0;
+            skidsData.forEach(s => s.items.forEach(si => { if(si.fbpn === item.fbpn) used += si.qtyOnSkid; }));
+            const remaining = item.qtyRequested - used;
+            if(remaining <= 0) return '';
+            return `<option value="${i}">${item.fbpn} (${remaining} left)</option>`;
+        }).join('');
+    }
+
+    function addItemToSkid(skidIdx, originalIdx) {
+        if(!originalIdx) return;
+        const item = parsedItems.filter(i => i.selected)[originalIdx];
+        
+        let used = 0;
+        skidsData.forEach(s => s.items.forEach(si => { if(si.fbpn === item.fbpn) used += si.qtyOnSkid; }));
+        const remaining = item.qtyRequested - used;
+
+        skidsData[skidIdx].items.push({
+            fbpn: item.fbpn,
+            description: item.description,
+            qtyOnSkid: remaining,
+            maxQty: remaining // simplistic tracking
+        });
+        renderSkidBuilder();
+    }
+
+    function updateSkidQty(sIdx, iIdx, val) {
+        skidsData[sIdx].items[iIdx].qtyOnSkid = parseInt(val) || 0;
+    }
+
+    function removeSkidItem(sIdx, iIdx) {
+        skidsData[sIdx].items.splice(iIdx, 1);
+        renderSkidBuilder();
+    }
+    
+    function duplicateSkid(idx) {
+        if(idx >= skidsData.length -1) return showAlert('No skid below to copy to.', 'warning');
+        skidsData[idx+1].items = JSON.parse(JSON.stringify(skidsData[idx].items));
+        renderSkidBuilder();
+    }
+
+    // --- Submit ---
+    function populateSummary() {
+        const list = document.getElementById('summaryList');
+        list.innerHTML = '';
+        skidsData.forEach(s => {
+            const li = document.createElement('div');
+            li.style.padding = '8px';
+            li.style.borderBottom = '1px solid #eee';
+            li.innerHTML = `<strong>Skid ${s.skidNumber}:</strong> ${s.items.reduce((a,b)=>a+b.qtyOnSkid,0)} units`;
+            list.appendChild(li);
+        });
+    }
+
+    function processShipment() {
+        const shipDate = document.getElementById('shipDate').value;
+        if(!shipDate) return showAlert('Enter Ship Date', 'danger');
+
+        const payload = {
+            orderNumber: document.getElementById('orderNumber').value,
+            taskNumber: document.getElementById('taskNumber').value,
+            shipDate: shipDate,
+            carrier: document.getElementById('carrier').value,
+            tracking: document.getElementById('trackingNumber').value,
+            bol: document.getElementById('bolNumber').value,
+            skids: skidsData,
+            docsOnly: document.getElementById('docsOnly').checked
+        };
+        
+        // Add full header info
+        payload.company = document.getElementById('company').value;
+        payload.project = document.getElementById('project').value;
+        payload.deliverTo = document.getElementById('deliverTo').value;
+        payload.name = document.getElementById('name').value;
+        payload.phone = document.getElementById('phoneNumber').value;
+        
+        // Add requested items for TOC
+        payload.items = parsedItems.filter(i => i.selected);
+
+        showLoading(true, 'Generating Documents...');
+        const method = payload.docsOnly ? 'processPackingTOC_DocsOnly' : 'processPackingTOCAndShipment';
+
+        google.script.run.withSuccessHandler(res => {
+            showLoading(false);
+            if(res.success) {
+                showAlert('Complete!', 'success');
+                document.getElementById('results').innerHTML = `
+                    <div class="section">
+                        <div class="section-title">Documents</div>
+                        <a href="${res.tocUrl}" target="_blank" class="btn btn-primary btn-small">TOC PDF</a>
+                        <a href="${res.packingListsUrl}" target="_blank" class="btn btn-primary btn-small">Packing Lists</a>
+                    </div>
+                `;
+            } else {
+                showAlert(res.message, 'danger');
+            }
+        }).withFailureHandler(e => {
+            showLoading(false);
+            showAlert(e.message, 'danger');
+        })[method](payload);
+    }
+
+    // Utils
+    function showAlert(msg, type) {
+        const div = document.createElement('div');
+        div.className = `alert alert-${type}`;
+        div.innerText = msg;
+        document.querySelector('.modal-container').prepend(div);
+        setTimeout(() => div.remove(), 4000);
+    }
+    function showLoading(b, txt) {
+        const el = document.getElementById('loadingOverlay');
+        document.getElementById('loadingText').innerText = txt;
+        el.className = b ? 'loading-overlay active' : 'loading-overlay';
+    }
+  </script>
+</head>
+<body>
+  <div class="modal-container">
+    <div class="tab-navigation">
+      <button class="tab-button active" onclick="showTab(1)">1. Task & Items</button>
+      <button class="tab-button" onclick="showTab(2)">2. Build Skids</button>
+      <button class="tab-button" onclick="showTab(3)">3. Generate</button>
+    </div>
+
+    <!-- TAB 1: Task Selection & Items -->
+    <div id="tab1" class="tab-content active">
+        <div class="form-section">
+            <h2 class="form-section-title">Project Info</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label required">Task Number</label>
+                    <select id="taskNumber" class="form-select" onchange="onTaskNumberChange()"></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Order #</label>
+                    <input id="orderNumber" class="form-input" readonly>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Company</label>
+                    <input id="company" class="form-input" readonly>
+                </div>
+                 <div class="form-group">
+                    <label class="form-label">Project</label>
+                    <input id="project" class="form-input" readonly>
+                </div>
+            </div>
+            <!-- Side-by-side details -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Order Title</label>
+                    <input id="orderTitle" class="form-input" readonly>
+                </div>
+                 <div class="form-group">
+                    <label class="form-label">Date</label>
+                    <input type="date" id="date" class="form-input">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Deliver To</label><input id="deliverTo" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Name</label><input id="name" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Phone</label><input id="phoneNumber" class="form-input"></div>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2 class="form-section-title" style="margin:0; border:none;">Order Items</h2>
+                <div class="stats-bar">
+                    <div class="stat-item"><span class="stat-label">Items:</span><span class="stat-value" id="statCount">0</span></div>
+                    <div class="stat-item"><span class="stat-label">Qty:</span><span class="stat-value" id="statQty">0</span></div>
+                </div>
+            </div>
+            <div class="items-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:40px;"></th>
+                            <th>FBPN</th>
+                            <th>Description</th>
+                            <th style="text-align:center;">Qty</th>
+                        </tr>
+                    </thead>
+                    <tbody id="itemsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: Build Skids -->
+    <div id="tab2" class="tab-content">
+        <div class="form-section">
+            <div class="form-row" style="align-items:flex-end;">
+                <div class="form-group" style="max-width:200px;">
+                    <label class="form-label">Number of Skids</label>
+                    <input type="number" id="skidCount" class="form-input" min="1" onchange="buildSkidsData()">
+                </div>
+                <div style="color:var(--text-secondary); font-size:0.85rem; padding-bottom:8px;">
+                    Set count to reset configuration.
+                </div>
+            </div>
+        </div>
+        <div id="skidsContainer"></div>
+    </div>
+
+    <!-- TAB 3: Generate -->
+    <div id="tab3" class="tab-content">
+        <div class="form-section">
+            <h2 class="form-section-title">Shipment Info</h2>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label required">Ship Date</label><input type="date" id="shipDate" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Carrier</label><input id="carrier" class="form-input"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Tracking #</label><input id="trackingNumber" class="form-input"></div>
+                <div class="form-group"><label class="form-label">BOL #</label><input id="bolNumber" class="form-input"></div>
+            </div>
+            <div class="form-row" style="margin-top:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="docsOnly">
+                    <label for="docsOnly" style="margin:0;">Docs Only (No Inventory Updates)</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <h2 class="form-section-title">Summary</h2>
+            <div id="summaryList"></div>
+            <div id="results" style="margin-top:10px;"></div>
+            <button class="btn btn-success btn-large" style="width:100%; margin-top:10px;" onclick="processShipment()">Complete Shipment</button>
+        </div>
+    </div>
+
+    <div class="button-group">
+        <button id="prevBtn" class="btn btn-secondary" onclick="prevTab()" style="display:none;">Back</button>
+        <button id="nextBtn" class="btn btn-primary" onclick="nextTab()">Next</button>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div id="loadingText" class="loading-text">Processing...</div>
+  </div>
+</body>
+</html>

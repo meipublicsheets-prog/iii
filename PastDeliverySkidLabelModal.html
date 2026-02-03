@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <?!= include('UniversalStyles'); ?>
+    <style>
+        :root {
+            --modal-bg: #ffffff;
+            --surface: #f8f9fa;
+            --surface-hover: #f1f3f5;
+            --border: #e9ecef;
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --text-muted: #adb5bd;
+            --accent: #228be6;
+            --accent-hover: #1c7ed6;
+            --success: #40c057;
+            --radius: 6px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 13px;
+            color: var(--text-primary);
+            background: var(--modal-bg);
+            margin: 0;
+            padding: 12px;
+        }
+
+        .modal-wrap {
+            max-width: 820px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 0 0 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-subtitle {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 0 0 12px 0;
+        }
+
+        /* Search Bar */
+        .search-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .search-input {
+            flex: 1;
+            height: 34px;
+            padding: 0 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 13px;
+            transition: border-color 0.15s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .btn {
+            height: 34px;
+            padding: 0 14px;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-primary:disabled {
+            background: #adb5bd;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+        }
+
+        .btn-sm {
+            height: 28px;
+            padding: 0 10px;
+            font-size: 11px;
+        }
+
+        /* Alerts */
+        .alert {
+            padding: 8px 12px;
+            border-radius: var(--radius);
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .alert-error {
+            background: #fff5f5;
+            color: #c92a2a;
+            border: 1px solid #ffc9c9;
+        }
+
+        .alert-success {
+            background: #ebfbee;
+            color: #2b8a3e;
+            border: 1px solid #b2f2bb;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Table */
+        .table-container {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .table-scroll {
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            background: var(--surface);
+            z-index: 1;
+        }
+
+        th,
+        td {
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            letter-spacing: 0.3px;
+        }
+
+        tbody tr:hover {
+            background: var(--surface-hover);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .txn-code {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* Section Header */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Skid List */
+        .skid-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+        }
+
+        .skid-row {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.1s;
+            gap: 12px;
+        }
+
+        .skid-row:last-child {
+            border-bottom: none;
+        }
+
+        .skid-row:hover {
+            background: var(--surface-hover);
+        }
+
+        .skid-row.selected {
+            background: #e7f5ff;
+        }
+
+        .skid-checkbox {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .skid-details {
+            display: flex;
+            flex: 1;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .skid-field {
+            min-width: 70px;
+        }
+
+        .skid-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.3px;
+        }
+
+        .skid-value {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        /* Action Bar */
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: var(--surface);
+            border-radius: var(--radius);
+            margin-top: 10px;
+        }
+
+        .action-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .selection-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .selection-text strong {
+            color: var(--accent);
+        }
+
+        .copies-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 12px;
+            padding-left: 12px;
+            border-left: 1px solid var(--border);
+        }
+
+        .copies-group label {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .copies-input {
+            width: 50px;
+            height: 28px;
+            padding: 0 8px;
+            text-align: center;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* Result Box */
+        .result-box {
+            padding: 10px 12px;
+            background: #ebfbee;
+            border: 1px solid #b2f2bb;
+            border-radius: var(--radius);
+            margin-top: 10px;
+        }
+
+        .result-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: #2b8a3e;
+            margin-bottom: 6px;
+        }
+
+        .result-links {
+            display: flex;
+            gap: 12px;
+        }
+
+        .result-links a {
+            font-size: 12px;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .result-links a:hover {
+            text-decoration: underline;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+        }
+
+        .empty-icon {
+            font-size: 28px;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+
+        .empty-text {
+            font-size: 13px;
+        }
+
+        /* Loading */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loading-overlay" id="loading">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loadingText">Loading...</div>
+    </div>
+
+    <div class="modal-wrap">
+        <h1 class="modal-title">Past Delivery Labels</h1>
+        <p class="modal-subtitle">Search for past deliveries by BOL and generate skid labels.</p>
+
+        <!-- Search -->
+        <div class="search-bar">
+            <input type="text" id="bolInput" class="search-input" placeholder="Enter BOL number..." autofocus>
+            <button class="btn btn-primary" id="searchBtn">Search</button>
+        </div>
+
+        <!-- Alerts -->
+        <div id="errorMsg" class="alert alert-error hidden"></div>
+
+        <!-- Recent Section -->
+        <div id="recentSection">
+            <div class="section-header">
+                <span class="section-title">Recent Deliveries</span>
+                <button class="btn btn-secondary btn-sm" id="refreshBtn">Refresh</button>
+            </div>
+            <div class="table-container">
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>BOL</th>
+                                <th>Date</th>
+                                <th>Manufacturer</th>
+                                <th>Push #</th>
+                                <th>TXN</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentBody">
+                            <tr>
+                                <td colspan="6" class="empty-state">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden">
+            <div class="section-header">
+                <span class="section-title">Skids for BOL: <span id="resultsBol"></span></span>
+                <button class="btn btn-secondary btn-sm" id="backBtn">← Back</button>
+            </div>
+            <div class="skid-list" id="skidList"></div>
+
+            <div class="action-bar">
+                <div class="action-left">
+                    <button class="btn btn-secondary btn-sm" id="selectAllBtn">Select All</button>
+                    <button class="btn btn-secondary btn-sm" id="deselectBtn">Deselect</button>
+                    <span class="selection-text"><strong id="selectedCount">0</strong> selected</span>
+                    <div class="copies-group">
+                        <label>Copies:</label>
+                        <input type="number" id="copiesInput" class="copies-input" min="1" max="10" value="1">
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="generateBtn" disabled>Generate Labels</button>
+            </div>
+        </div>
+
+        <!-- Result -->
+        <div id="resultBox" class="result-box hidden">
+            <div class="result-title">Labels Generated</div>
+            <div class="result-links">
+                <a id="pdfLink" href="#" target="_blank">Open PDF</a>
+                <a id="htmlLink" href="#" target="_blank">Open HTML</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        let currentBol = '';
+        let skidsData = [];
+        let selectedSkids = new Set();
+
+        function showLoading(on, msg) {
+            $('loading').classList.toggle('active', !!on);
+            if (msg) $('loadingText').textContent = msg;
+        }
+
+        function showError(msg) {
+            $('errorMsg').textContent = msg || '';
+            $('errorMsg').classList.toggle('hidden', !msg);
+        }
+
+        function esc(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Recent Deliveries
+        function loadRecent() {
+            showLoading(true, 'Loading...');
+            google.script.run
+                .withSuccessHandler(res => {
+                    showLoading(false);
+                    renderRecent(res || []);
+                })
+                .withFailureHandler(err => {
+                    showLoading(false);
+                    $('recentBody').innerHTML = '<tr><td colspan="6" class="empty-state">Failed to load</td></tr>';
+                })
+                .getRecentInboundTransactions(25);
+        }
+
+        function renderRecent(data) {
+            if (data.length === 0) {
+                $('recentBody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon"></div><div class="empty-text">No recent deliveries</div></div></td></tr>`;
+                return;
+            }
+            $('recentBody').innerHTML = data.map(r => `
+                <tr>
+                    <td><strong>${esc(r.bol || '-')}</strong></td>
+                    <td>${esc(r.date || '-')}</td>
+                    <td>${esc(r.manufacturer || '-')}</td>
+                    <td>${esc(r.push || '-')}</td>
+                    <td class="txn-code">${esc(r.txnId || '-')}</td>
+                    <td><button class="btn btn-secondary btn-sm" onclick="searchByTxn('${esc(r.txnId)}', '${esc(r.bol)}')">View</button></td>
+                </tr>
+            `).join('');
+        }
+
+        // Search by TXN_ID directly (for View button on rows)
+        function searchByTxn(txnId, bol) {
+            if (!txnId) { showError('No TXN_ID available'); return; }
+
+            currentBol = (bol || '').trim().toUpperCase() || txnId;
+            showError('');
+            showLoading(true, 'Loading skids...');
+            $('resultBox').classList.add('hidden');
+
+            google.script.run
+                .withSuccessHandler(res => {
+                    showLoading(false);
+                    if (res.success) {
+                        skidsData = res.skids || [];
+                        showResults(currentBol);
+                    } else {
+                        showError(res.message || 'No skids found');
+                    }
+                })
+                .withFailureHandler(err => {
+                    showLoading(false);
+                    showError(err.message || 'Error');
+                })
+                .shell_getSkidsByTxnId(txnId);
+        }
+
+        // Search by BOL (for manual search input)
+        function search(bol) {
+            const b = (bol || $('bolInput').value).trim().toUpperCase();
+            if (!b) { showError('Enter a BOL number'); return; }
+
+            currentBol = b;
+            showError('');
+            showLoading(true, 'Searching...');
+            $('resultBox').classList.add('hidden');
+
+            google.script.run
+                .withSuccessHandler(res => {
+                    showLoading(false);
+                    if (res.success) {
+                        skidsData = res.skids || [];
+                        showResults(b);
+                    } else {
+                        showError(res.message || 'Not found');
+                    }
+                })
+                .withFailureHandler(err => {
+                    showLoading(false);
+                    showError(err.message || 'Error');
+                })
+                .shell_getSkidsForBOL(b);
+        }
+
+        function showResults(bol) {
+            $('recentSection').classList.add('hidden');
+            $('resultsSection').classList.remove('hidden');
+            $('resultsBol').textContent = bol;
+            selectedSkids.clear();
+            renderSkids();
+            updateSelection();
+        }
+
+        function renderSkids() {
+            if (skidsData.length === 0) {
+                $('skidList').innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">No skids found</div></div>`;
+                return;
+            }
+            $('skidList').innerHTML = skidsData.map((s, i) => `
+                <div class="skid-row${selectedSkids.has(i) ? ' selected' : ''}" data-idx="${i}" onclick="toggle(${i})">
+                    <input type="checkbox" class="skid-checkbox" ${selectedSkids.has(i) ? 'checked' : ''}>
+                    <div class="skid-details">
+                        <div class="skid-field"><div class="skid-label">Skid ID</div><div class="skid-value">${esc(s.skidId)}</div></div>
+                        <div class="skid-field"><div class="skid-label">FBPN</div><div class="skid-value">${esc(s.fbpn)}</div></div>
+                        <div class="skid-field"><div class="skid-label">Qty</div><div class="skid-value">${s.qty || 0}</div></div>
+                        <div class="skid-field"><div class="skid-label">Project</div><div class="skid-value">${esc(s.project || '-')}</div></div>
+                        <div class="skid-field"><div class="skid-label">Date</div><div class="skid-value">${esc(s.dateReceived || '-')}</div></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggle(i) {
+            selectedSkids.has(i) ? selectedSkids.delete(i) : selectedSkids.add(i);
+            renderSkids();
+            updateSelection();
+        }
+
+        function selectAll() { skidsData.forEach((_, i) => selectedSkids.add(i)); renderSkids(); updateSelection(); }
+        function deselectAll() { selectedSkids.clear(); renderSkids(); updateSelection(); }
+        function updateSelection() {
+            $('selectedCount').textContent = selectedSkids.size;
+            $('generateBtn').disabled = selectedSkids.size === 0;
+        }
+
+        function goBack() {
+            $('resultsSection').classList.add('hidden');
+            $('recentSection').classList.remove('hidden');
+            $('bolInput').value = '';
+            $('resultBox').classList.add('hidden');
+            showError('');
+        }
+
+        // Generate
+        function generate() {
+            if (selectedSkids.size === 0) return;
+            const copies = Math.min(10, Math.max(1, parseInt($('copiesInput').value) || 1));
+            const selected = Array.from(selectedSkids).map(i => skidsData[i]);
+
+            showLoading(true, 'Generating...');
+            showError('');
+
+            google.script.run
+                .withSuccessHandler(res => {
+                    showLoading(false);
+                    if (res.success) {
+                        showResult(res);
+                    } else {
+                        showError(res.message || 'Failed');
+                    }
+                })
+                .withFailureHandler(err => {
+                    showLoading(false);
+                    showError(err.message || 'Error');
+                })
+                .shell_generatePastDeliverySkidLabels({ bolNumber: currentBol, skids: selected, copies: copies });
+        }
+
+        function showResult(res) {
+            $('resultBox').classList.remove('hidden');
+            $('pdfLink').href = res.pdfUrl || '#';
+            $('pdfLink').classList.toggle('hidden', !res.pdfUrl);
+            $('htmlLink').href = res.htmlUrl || '#';
+            $('htmlLink').classList.toggle('hidden', !res.htmlUrl);
+        }
+
+        // Events
+        $('searchBtn').addEventListener('click', () => search());
+        $('bolInput').addEventListener('keypress', e => { if (e.key === 'Enter') search(); });
+        $('refreshBtn').addEventListener('click', loadRecent);
+        $('backBtn').addEventListener('click', goBack);
+        $('selectAllBtn').addEventListener('click', selectAll);
+        $('deselectBtn').addEventListener('click', deselectAll);
+        $('generateBtn').addEventListener('click', generate);
+
+        // Init
+        loadRecent();
+    </script>
+</body>
+
+</html>

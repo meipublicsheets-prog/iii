@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <?!= include('UniversalStyles'); ?>
+</head>
+
+<body>
+    <div class="loading-overlay" id="loading">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingText">Saving...</div>
+    </div>
+
+    <div class="modal-container" style="max-width: 500px;">
+        <div class="modal-header">
+            <h1>Add New Item</h1>
+            <p>Add a new part to Item_Master</p>
+        </div>
+
+        <div style="padding: 14px;">
+            <div class="form-section">
+                <div class="form-group">
+                    <label class="form-label required">FBPN (Part Number)</label>
+                    <input type="text" id="fbpn" class="form-input" placeholder="e.g., FBPN-001234">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">MFPN (Manufacturer Part Number)</label>
+                    <input type="text" id="mfpn" class="form-input" placeholder="Manufacturer's part number">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input type="text" id="description" class="form-input" placeholder="Part description">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">UOM (Unit of Measure)</label>
+                    <select id="uom" class="form-select">
+                        <option value="">Select UOM</option>
+                        <option value="EA">EA - Each</option>
+                        <option value="PC">PC - Piece</option>
+                        <option value="FT">FT - Feet</option>
+                        <option value="M">M - Meters</option>
+                        <option value="BOX">BOX - Box</option>
+                        <option value="CASE">CASE - Case</option>
+                        <option value="ROLL">ROLL - Roll</option>
+                        <option value="SET">SET - Set</option>
+                        <option value="KIT">KIT - Kit</option>
+                        <option value="LB">LB - Pounds</option>
+                        <option value="KG">KG - Kilograms</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Manufacturer</label>
+                    <input type="text" id="manufacturer" class="form-input" placeholder="Manufacturer name">
+                </div>
+            </div>
+
+            <div id="resultBox" class="alert alert-success" style="display: none;">
+                <span id="resultMsg"></span>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-secondary" onclick="google.script.host.close()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveItem()">Add Item</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        function showLoading(on, msg) {
+            $('loading').classList.toggle('active', !!on);
+            if (msg) $('loadingText').textContent = msg;
+        }
+
+        function showAlert(msg, type) {
+            const div = document.createElement('div');
+            div.className = 'alert alert-' + type;
+            div.textContent = msg;
+            const container = document.querySelector('.form-section');
+            container.parentNode.insertBefore(div, container);
+            setTimeout(() => div.remove(), 4000);
+        }
+
+        function saveItem() {
+            const fbpn = $('fbpn').value.trim().toUpperCase();
+            if (!fbpn) {
+                showAlert('FBPN is required', 'danger');
+                return;
+            }
+
+            const data = {
+                fbpn: fbpn,
+                mfpn: $('mfpn').value.trim(),
+                description: $('description').value.trim(),
+                uom: $('uom').value,
+                manufacturer: $('manufacturer').value.trim()
+            };
+
+            showLoading(true, 'Adding item...');
+
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    showLoading(false);
+                    if (result && result.success) {
+                        $('resultBox').style.display = 'block';
+                        $('resultMsg').textContent = 'Item added successfully! Row: ' + result.row;
+                        // Clear form
+                        $('fbpn').value = '';
+                        $('mfpn').value = '';
+                        $('description').value = '';
+                        $('uom').value = '';
+                        $('manufacturer').value = '';
+                    } else {
+                        showAlert('Error: ' + (result ? result.message : 'Unknown error'), 'danger');
+                    }
+                })
+                .withFailureHandler(function (err) {
+                    showLoading(false);
+                    showAlert('Error: ' + (err.message || err), 'danger');
+                })
+                .addItemToItemMaster(data);
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <?!= include('UniversalStyles'); ?>
+  <style>
+    /* Enhanced Layout Styles */
+    .task-selector-section {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+      padding: 30px;
+      border-radius: var(--radius-lg);
+      margin-bottom: 30px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .task-selector-section h2 {
+      color: white;
+      margin: 0 0 20px 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .task-select-wrapper {
+      position: relative;
+    }
+
+    .task-select-wrapper select {
+      width: 100%;
+      padding: 16px 20px;
+      font-size: 1.1rem;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .task-select-wrapper select:focus {
+      outline: none;
+      border-color: white;
+      background: white;
+      box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.2);
+    }
+
+    .order-details-card {
+      background: var(--bg-element);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 0;
+      margin-bottom: 30px;
+      overflow: hidden;
+      display: none;
+      animation: slideDown 0.3s ease-out;
+    }
+
+    .order-details-card.active {
+      display: block;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .order-details-header {
+      background: linear-gradient(135deg, var(--bg-body) 0%, var(--bg-element) 100%);
+      padding: 20px 25px;
+      border-bottom: 2px solid var(--border-color);
+    }
+
+    .order-details-header h3 {
+      margin: 0;
+      color: var(--text-main);
+      font-size: 1.3rem;
+      font-weight: 600;
+    }
+
+    .order-details-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      padding: 25px;
+    }
+
+    .detail-item {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .detail-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      letter-spacing: 0.5px;
+    }
+
+    .detail-value {
+      font-size: 1rem;
+      color: var(--text-main);
+      font-weight: 500;
+      padding: 10px 12px;
+      background: var(--bg-body);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+    }
+
+    .detail-value.empty {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .items-section {
+      background: var(--bg-element);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: none;
+    }
+
+    .items-section.active {
+      display: block;
+      animation: slideDown 0.3s ease-out;
+    }
+
+    .items-header {
+      background: linear-gradient(135deg, var(--bg-body) 0%, var(--bg-element) 100%);
+      padding: 20px 25px;
+      border-bottom: 2px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .items-header h3 {
+      margin: 0;
+      color: var(--text-main);
+      font-size: 1.3rem;
+      font-weight: 600;
+    }
+
+    .item-count-badge {
+      background: var(--primary);
+      color: white;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .items-table-wrapper {
+      max-height: 400px;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .items-table thead {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--bg-element);
+    }
+
+    .items-table th {
+      padding: 16px 20px;
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 2px solid var(--border-color);
+      background: var(--bg-element);
+    }
+
+    .items-table td {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.95rem;
+      color: var(--text-main);
+    }
+
+    .items-table tbody tr {
+      transition: background-color 0.2s ease;
+    }
+
+    .items-table tbody tr:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .items-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .fbpn-cell {
+      font-family: 'Courier New', monospace;
+      font-weight: 600;
+      color: var(--primary);
+      font-size: 1rem;
+    }
+
+    .qty-cell {
+      font-weight: 600;
+      text-align: center;
+      color: var(--text-main);
+    }
+
+    .row-number {
+      color: var(--text-secondary);
+      font-weight: 500;
+      text-align: center;
+    }
+
+    .empty-state {
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 3rem;
+      margin-bottom: 15px;
+      opacity: 0.5;
+    }
+
+    .empty-state-text {
+      font-size: 1.1rem;
+      font-weight: 500;
+    }
+
+    .actions-section {
+      margin-top: 30px;
+      padding-top: 30px;
+      border-top: 2px solid var(--border-color);
+    }
+
+    .optional-fields {
+      background: var(--bg-element);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .optional-fields h4 {
+      margin: 0 0 15px 0;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+    }
+  </style>
+  <script>
+    let parsedItems = [];
+    let currentOrderData = null;
+
+    window.onload = function () {
+      loadTaskNumbers();
+    };
+
+    function loadTaskNumbers() {
+      google.script.run
+        .withSuccessHandler(function (taskNumbers) {
+          const select = document.getElementById('taskNumber');
+          if (!select) return;
+          select.innerHTML = '<option value="">-- Select a Task Number --</option>';
+
+          if (!taskNumbers || !taskNumbers.length) {
+            console.warn('No task numbers returned from server');
+            showAlert('No active task numbers found in spreadsheet.', 'warning');
+            return;
+          }
+
+          taskNumbers.forEach(task => {
+            if (!task) return;
+            const option = document.createElement('option');
+            option.value = task;
+            option.textContent = task;
+            select.appendChild(option);
+          });
+        })
+        .withFailureHandler(function (error) {
+          console.error('Error loading task numbers:', error);
+          showAlert('Error loading task numbers: ' + (error.message || error), 'danger');
+        })
+        .getTaskNumbers();
+    }
+
+    function onTaskNumberChange() {
+      const taskNumber = document.getElementById('taskNumber').value;
+
+      if (!taskNumber) {
+        hideOrderDetails();
+        return;
+      }
+
+      showLoading(true, 'Loading order details...');
+
+      google.script.run
+        .withSuccessHandler(function (orderData) {
+          showLoading(false);
+
+          if (!orderData) {
+            showAlert('No order found for this task number', 'warning');
+            hideOrderDetails();
+            return;
+          }
+
+          currentOrderData = orderData;
+          displayOrderDetails(orderData);
+          displayItems(orderData.items || []);
+          
+          if (orderData.items && orderData.items.length > 0) {
+            showAlert(`Loaded order with ${orderData.items.length} items`, 'success');
+          }
+        })
+        .withFailureHandler(function (error) {
+          showLoading(false);
+          showAlert('Error loading order data: ' + error.message, 'danger');
+          hideOrderDetails();
+        })
+        .getOrderByTaskNumber(taskNumber);
+    }
+
+    function displayOrderDetails(orderData) {
+      // Populate detail fields
+      document.getElementById('detail-order-id').textContent = orderData.orderId || 'N/A';
+      document.getElementById('detail-order-title').textContent = orderData.orderTitle || 'N/A';
+      document.getElementById('detail-company').textContent = orderData.company || 'N/A';
+      document.getElementById('detail-project').textContent = orderData.project || 'N/A';
+      document.getElementById('detail-task-number').textContent = orderData.taskNumber || 'N/A';
+      document.getElementById('detail-nbd').textContent = orderData.nbdDate || 'N/A';
+
+      // Show the details card
+      document.getElementById('orderDetailsCard').classList.add('active');
+    }
+
+    function displayItems(items) {
+      parsedItems = items || [];
+      const tbody = document.getElementById('itemsTableBody');
+      tbody.innerHTML = '';
+
+      if (parsedItems.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="4" class="empty-state">
+              <div class="empty-state-icon" style="font-size:1.5rem; color:var(--text-secondary);">—</div>
+              <div class="empty-state-text">No items in this order</div>
+            </td>
+          </tr>
+        `;
+        document.getElementById('itemsSection').classList.remove('active');
+        return;
+      }
+
+      parsedItems.forEach((item, index) => {
+        const row = tbody.insertRow();
+        row.innerHTML = `
+          <td class="row-number">${index + 1}</td>
+          <td class="fbpn-cell">${item.fbpn || 'N/A'}</td>
+          <td>${item.description || ''}</td>
+          <td class="qty-cell">${item.qtyRequested || 0}</td>
+        `;
+      });
+
+      // Update item count badge
+      document.getElementById('itemCount').textContent = `${parsedItems.length} Items`;
+      document.getElementById('itemsSection').classList.add('active');
+    }
+
+    function hideOrderDetails() {
+      document.getElementById('orderDetailsCard').classList.remove('active');
+      document.getElementById('itemsSection').classList.remove('active');
+      currentOrderData = null;
+      parsedItems = [];
+    }
+
+    function generatePickTicket() {
+      if (!currentOrderData || parsedItems.length === 0) {
+        showAlert('Please select a task number first', 'danger');
+        return;
+      }
+
+      const formData = {
+        date: new Date().toISOString().split('T')[0],
+        orderNumber: currentOrderData.orderId,
+        orderTitle: currentOrderData.orderTitle,
+        taskNumber: currentOrderData.taskNumber,
+        company: currentOrderData.company,
+        project: currentOrderData.project,
+        trackNumber: document.getElementById('trackNumber').value || '',
+        requestId: document.getElementById('requestId').value || '',
+        items: parsedItems
+      };
+
+      showLoading(true, 'Generating Pick Ticket...');
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          showLoading(false);
+          if (result.success) {
+            showAlert('Pick Ticket generated successfully!', 'success');
+            document.getElementById('resultLink').innerHTML =
+              `<a href="${result.pdfUrl}" target="_blank" class="btn btn-success">View ${result.name}</a>`;
+          } else {
+            showAlert('Error: ' + result.message, 'danger');
+          }
+        })
+        .withFailureHandler(function (error) {
+          showLoading(false);
+          showAlert('Error: ' + error.message, 'danger');
+        })
+        .generatePickTicket(formData);
+    }
+
+    function showAlert(message, type) {
+      const alertDiv = document.createElement('div');
+      alertDiv.className = `alert alert-${type}`;
+      alertDiv.textContent = message;
+
+      const container = document.querySelector('.modal-container');
+      container.insertBefore(alertDiv, container.firstChild);
+
+      setTimeout(() => alertDiv.remove(), 5000);
+    }
+
+    function showLoading(show, message = 'Processing...') {
+      const overlay = document.getElementById('loadingOverlay');
+      const text = document.getElementById('loadingText');
+      if (text) text.textContent = message;
+
+      if (show) {
+        overlay.classList.add('active');
+      } else {
+        overlay.classList.remove('active');
+      }
+    }
+  </script>
+</head>
+
+<body>
+  <div class="modal-container">
+    <div style="padding: 25px;">
+      <!-- Task Number Selector -->
+      <div class="task-selector-section">
+        <h2>1. Select Task Number</h2>
+        <div class="task-select-wrapper">
+          <select id="taskNumber" class="form-select" onchange="onTaskNumberChange()">
+            <option value="">-- Select a Task Number --</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Order Details Card -->
+      <div id="orderDetailsCard" class="order-details-card">
+        <div class="order-details-header">
+          <h3>Order Details</h3>
+        </div>
+        <div class="order-details-grid">
+          <div class="detail-item">
+            <span class="detail-label">Order ID</span>
+            <span class="detail-value" id="detail-order-id">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Task Number</span>
+            <span class="detail-value" id="detail-task-number">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Company</span>
+            <span class="detail-value" id="detail-company">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Project</span>
+            <span class="detail-value" id="detail-project">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Order Title</span>
+            <span class="detail-value" id="detail-order-title">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Need By Date</span>
+            <span class="detail-value" id="detail-nbd">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Items Table -->
+      <div id="itemsSection" class="items-section">
+        <div class="items-header">
+          <h3>Items to Pick</h3>
+          <span class="item-count-badge" id="itemCount">0 Items</span>
+        </div>
+        <div class="items-table-wrapper">
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 60px;">#</th>
+                <th style="width: 200px;">FBPN</th>
+                <th>Description</th>
+                <th style="width: 120px; text-align: center;">Qty</th>
+              </tr>
+            </thead>
+            <tbody id="itemsTableBody">
+              <tr>
+                <td colspan="4" class="empty-state">
+                  <div class="empty-state-icon" style="font-size:1.5rem; color:var(--text-secondary);">...</div>
+                  <div class="empty-state-text">Select a task number above to view items</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Optional Fields -->
+      <div class="actions-section">
+        <div class="optional-fields">
+          <h4>Optional Information</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Track Number</label>
+              <input type="text" id="trackNumber" class="form-input" placeholder="Optional tracking number">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Request ID</label>
+              <input type="text" id="requestId" class="form-input" placeholder="Optional request ID">
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="button-group">
+          <button class="btn btn-secondary" onclick="google.script.host.close()">Close</button>
+          <button class="btn btn-success btn-large" onclick="generatePickTicket()">
+            Generate Pick Ticket
+          </button>
+        </div>
+        <div id="resultLink" class="mt-2 text-center" style="margin-top: 16px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div id="loadingText" class="loading-text">Generating Pick Ticket...</div>
+  </div>
+</body>
+
+</html>

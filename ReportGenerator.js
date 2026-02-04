@@ -305,192 +305,185 @@ function getOutboundReportData(params) {
 }
 
 // ============================================================================
-// HTML PORTRAIT GENERATION
+// HTML LANDSCAPE A4 GENERATION
 // ============================================================================
 
 function buildInboundReportHtml_(params, reportData) {
   const rows = reportData.rows || [];
   const dateRange = reportData.dateRange || `${params.startDate} - ${params.endDate}`;
   const generatedAt = new Date().toLocaleString();
+  const reportId = `${new Date().getFullYear()}-INB-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
 
   // Calculate summary statistics
   let totalQty = 0;
   const uniqueProjects = new Set();
   const uniquePOs = new Set();
   const uniqueBOLs = new Set();
+  const uniqueFBPNs = new Set();
   rows.forEach(r => {
     totalQty += Number(r.qty || 0) || 0;
     if (r.project) uniqueProjects.add(r.project);
     if (r.poNumber) uniquePOs.add(r.poNumber);
     if (r.bol) uniqueBOLs.add(r.bol);
+    if (r.fbpn) uniqueFBPNs.add(r.fbpn);
   });
 
-  // Group by date -> project -> PO -> BOL
-  const groups = {};
+  // Group by project -> PO
+  const projectGroups = {};
   rows.forEach(r => {
-    const d = r.dateReceived || '';
-    const proj = (r.project || '').toString().trim() || 'Unassigned Project';
+    const proj = (r.project || '').toString().trim() || 'Unassigned';
     const po = (r.poNumber || '').toString().trim() || 'No PO';
-    const bol = (r.bol || '').toString().trim() || 'No BOL';
-    groups[d] = groups[d] || {};
-    groups[d][proj] = groups[d][proj] || {};
-    groups[d][proj][po] = groups[d][proj][po] || {};
-    groups[d][proj][po][bol] = groups[d][proj][po][bol] || [];
-    groups[d][proj][po][bol].push(r);
+    projectGroups[proj] = projectGroups[proj] || {};
+    projectGroups[proj][po] = projectGroups[proj][po] || [];
+    projectGroups[proj][po].push(r);
   });
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  // Build daily summary data
-  const dailySummary = [];
-  Object.keys(groups).sort().forEach(dateKey => {
-    let dateTotal = 0, dateLines = 0;
-    const dateProjects = new Set(), datePOs = new Set(), dateBOLs = new Set();
-    Object.keys(groups[dateKey]).forEach(proj => {
-      dateProjects.add(proj);
-      Object.keys(groups[dateKey][proj]).forEach(po => {
-        datePOs.add(po);
-        Object.keys(groups[dateKey][proj][po]).forEach(bol => {
-          dateBOLs.add(bol);
-          const items = groups[dateKey][proj][po][bol];
-          dateLines += items.length;
-          items.forEach(x => dateTotal += Number(x.qty || 0) || 0);
-        });
+  // Build hierarchy HTML (Page 1)
+  let hierarchyHtml = '';
+  Object.keys(projectGroups).sort().forEach(projKey => {
+    hierarchyHtml += `<div class="h-proj">${esc(projKey)}</div>`;
+    const poObj = projectGroups[projKey];
+    Object.keys(poObj).sort().forEach(poKey => {
+      const items = poObj[poKey];
+      hierarchyHtml += `<div class="h-po-wrap"><div class="h-po-head">PO: ${esc(poKey)}</div>`;
+      items.forEach(item => {
+        hierarchyHtml += `
+          <div class="h-item">
+            <div><span class="lbl">MFR:</span>${esc(item.manufacturer)}</div>
+            <div><span class="lbl">FBPN:</span>${esc(item.fbpn)}</div>
+            <div><span class="lbl">Asset:</span>${esc(item.assetType || '')}</div>
+            <div style="text-align:right"><strong>${Number(item.qty || 0).toLocaleString()}</strong> <span class="lbl">QTY</span></div>
+          </div>`;
       });
+      hierarchyHtml += `</div>`;
     });
-    dailySummary.push({ date: dateKey, lines: dateLines, qty: dateTotal, projects: dateProjects.size, pos: datePOs.size, bols: dateBOLs.size });
   });
 
-  // Build daily summary table
-  let dailyTableHtml = `
-    <table class="daily-table">
-      <thead>
-        <tr><th>Date</th><th>Lines</th><th>Units</th><th>Projects</th><th>POs</th><th>BOLs</th></tr>
-      </thead>
-      <tbody>
-        ${dailySummary.map(d => `
-          <tr>
-            <td>${esc(d.date)}</td>
-            <td>${d.lines.toLocaleString()}</td>
-            <td>${d.qty.toLocaleString()}</td>
-            <td>${d.projects}</td>
-            <td>${d.pos}</td>
-            <td>${d.bols}</td>
-          </tr>
-        `).join('')}
-        <tr class="total-row">
-          <td>TOTAL</td>
-          <td>${rows.length.toLocaleString()}</td>
-          <td>${totalQty.toLocaleString()}</td>
-          <td>${uniqueProjects.size}</td>
-          <td>${uniquePOs.size}</td>
-          <td>${uniqueBOLs.size}</td>
-        </tr>
-      </tbody>
-    </table>`;
-
-  // Build detailed breakdown by project
+  // Build detailed tables HTML (Page 2+)
   let detailHtml = '';
-  Object.keys(groups).sort().forEach(dateKey => {
-    Object.keys(groups[dateKey]).sort().forEach(projKey => {
-      detailHtml += `<div class="project-section"><div class="project-title">PROJECT: ${esc(projKey)}</div>`;
-      const poObj = groups[dateKey][projKey];
-      Object.keys(poObj).sort().forEach(poKey => {
-        detailHtml += `<div class="po-container"><div class="po-title">PO: ${esc(poKey)}</div>`;
-        const bolObj = poObj[poKey];
-        Object.keys(bolObj).sort().forEach(bolKey => {
-          const items = bolObj[bolKey];
-          let bolTotal = 0;
-          items.forEach(x => bolTotal += Number(x.qty || 0) || 0);
-          detailHtml += `
-            <div class="bol-section">
-              <div class="bol-title">BOL: ${esc(bolKey)} <span class="bol-summary">${items.length} lines | ${bolTotal.toLocaleString()} units</span></div>
-              <table class="data-table">
-                <thead>
-                  <tr><th>Push #</th><th>Asset Type</th><th>FBPN</th><th>Qty</th><th>Carrier</th></tr>
-                </thead>
-                <tbody>
-                  ${items.map(it => `
-                    <tr>
-                      <td>${esc(it.push)}</td>
-                      <td>${esc(it.assetType || '')}</td>
-                      <td><span class="pn-style">${esc(it.fbpn)}</span></td>
-                      <td class="qty-val">${esc(it.qty)}</td>
-                      <td>${esc(it.carrier)}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>`;
-        });
-        detailHtml += `</div>`;
-      });
-      detailHtml += `</div>`;
-    });
+  Object.keys(projectGroups).sort().forEach(projKey => {
+    const allItems = [];
+    Object.values(projectGroups[projKey]).forEach(items => allItems.push(...items));
+    if (allItems.length === 0) return;
+
+    detailHtml += `
+      <div class="detail-block">
+        <div class="detail-head">PROJECT: ${esc(projKey)}</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:9%">Date</th>
+              <th style="width:7%">Whse</th>
+              <th style="width:8%">Asset</th>
+              <th style="width:12%">Manufacturer</th>
+              <th style="width:12%">FBPN</th>
+              <th style="width:10%">PO#</th>
+              <th style="width:10%">BOL#</th>
+              <th style="width:6%">Qty</th>
+              <th style="width:8%">Carrier</th>
+              <th>Push #</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${allItems.map(item => `
+              <tr>
+                <td>${esc(item.dateReceived)}</td>
+                <td>${esc(item.warehouse)}</td>
+                <td>${esc(item.assetType || '')}</td>
+                <td>${esc(item.manufacturer)}</td>
+                <td>${esc(item.fbpn)}</td>
+                <td>${esc(item.poNumber)}</td>
+                <td>${esc(item.bol)}</td>
+                <td class="qty-cell">${Number(item.qty || 0).toLocaleString()}</td>
+                <td>${esc(item.carrier)}</td>
+                <td>${esc(item.push)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
   });
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Inbound Report</title>
 <style>
-  :root { --primary: #1e293b; --accent: #2563eb; --success: #059669; --bg: #f1f5f9; --border: #cbd5e1; }
-  @page { size: letter; margin: 0.5in; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #334155; margin: 0; padding: 20px; font-size: 10pt; }
+  @page { size: A4 landscape; margin: 15mm; }
+  :root { --primary: #0f172a; --accent: #2563eb; --success: #15803d; --border: #cbd5e1; --bg-odd: #f8fafc; }
+  body { font-family: 'Segoe UI', 'Helvetica', sans-serif; background: white; margin: 0; padding: 10mm; color: #1e293b; -webkit-print-color-adjust: exact; font-size: 11px; }
 
-  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 4px solid var(--primary); padding-bottom: 15px; margin-bottom: 25px; }
-  h1 { margin: 0; font-size: 22px; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
-  .subtitle { margin: 5px 0 0 0; color: var(--accent); font-weight: 600; font-size: 12px; }
-  .meta { text-align: right; font-size: 11px; color: #64748b; }
+  .print-header { position: fixed; top: 0; right: 0; text-align: right; font-size: 10px; color: #64748b; width: 100%; }
+  .print-footer { position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #cbd5e1; padding-top: 5px; background: white; }
 
-  .stat-banner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
-  .stat-card { background: #f8fafc; padding: 12px; border: 1px solid var(--border); text-align: center; border-radius: 4px; }
-  .stat-val { display: block; font-size: 20px; font-weight: 800; color: var(--accent); }
-  .stat-label { font-size: 10px; text-transform: uppercase; font-weight: 600; color: #64748b; }
+  .report-section { width: 100%; margin: 0 auto 20px auto; background: white; position: relative; }
+  .page-break-after { page-break-after: always; }
 
-  .section-title { font-size: 14px; font-weight: 700; color: var(--primary); margin: 25px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid var(--primary); }
+  h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px; color: var(--primary); }
+  h2 { font-size: 16px; color: var(--primary); border-bottom: 2px solid var(--primary); padding-bottom: 5px; margin-top: 0; margin-bottom: 15px; }
+  .meta-info { text-align: right; font-size: 11px; color: #475569; }
 
-  .daily-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-  .daily-table th { background: #f8fafc; padding: 10px; border: 1px solid var(--border); font-size: 10px; text-transform: uppercase; color: #64748b; }
-  .daily-table td { padding: 10px; border: 1px solid var(--border); text-align: center; font-size: 11px; }
-  .daily-table .total-row { background: #f1f5f9; font-weight: 800; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
+  .kpi-card { border: 2px solid var(--success); background: #f0fdf4; padding: 15px; text-align: center; border-radius: 6px; }
+  .kpi-num { display: block; font-size: 28px; font-weight: 900; color: var(--success); }
+  .kpi-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #166534; }
 
-  .project-section { margin-bottom: 25px; page-break-inside: avoid; }
-  .project-title { background: var(--primary); color: white; padding: 10px 15px; font-size: 13px; font-weight: 700; border-radius: 4px 4px 0 0; }
-  .po-container { border-left: 3px solid var(--accent); margin-left: 10px; padding-left: 15px; margin-top: 12px; }
-  .po-title { font-weight: 700; color: var(--accent); font-size: 12px; margin-bottom: 8px; }
-  .bol-section { margin-bottom: 12px; }
-  .bol-title { font-weight: 600; font-size: 11px; color: #475569; margin-bottom: 6px; padding: 6px 10px; background: #f8fafc; border-radius: 4px; }
-  .bol-summary { float: right; font-weight: 500; color: #64748b; }
+  .hierarchy-box { border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin-bottom: 20px; }
+  .h-proj { background: var(--primary); color: white; padding: 8px 12px; font-weight: 700; font-size: 13px; }
+  .h-po-wrap { background: #fff; border-bottom: 1px solid var(--border); }
+  .h-po-wrap:last-child { border-bottom: none; }
+  .h-po-head { background: #f1f5f9; color: var(--accent); padding: 6px 12px; font-size: 11px; font-weight: 700; border-bottom: 1px solid #e2e8f0; }
+  .h-item { display: grid; grid-template-columns: 2fr 1.5fr 1fr 1fr; padding: 5px 12px 5px 25px; font-size: 10px; border-bottom: 1px dashed #e2e8f0; align-items: center; }
+  .h-item:last-child { border-bottom: none; }
+  .lbl { font-size: 8px; text-transform: uppercase; color: #64748b; margin-right: 4px; font-weight: 700; }
 
-  .data-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-  .data-table th { text-align: left; font-size: 9px; text-transform: uppercase; color: #64748b; padding: 8px; border-bottom: 1px solid var(--border); background: #fafafa; }
-  .data-table td { padding: 8px; font-size: 11px; border-bottom: 1px dashed #e2e8f0; }
-  .pn-style { font-family: 'Consolas', monospace; background: #f1f5f9; padding: 2px 5px; border-radius: 3px; font-size: 10px; }
-  .qty-val { font-weight: 700; color: var(--success); }
+  .detail-block { margin-bottom: 25px; border: 1px solid var(--border); page-break-inside: avoid; }
+  .detail-head { background: var(--primary); color: white; padding: 8px 12px; font-weight: 700; font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th { background: #f1f5f9; text-align: left; padding: 7px 5px; border-bottom: 2px solid #94a3b8; font-size: 10px; font-weight: 800; color: var(--primary); border-right: 1px solid #cbd5e1; }
+  td { padding: 6px 5px; border-bottom: 1px solid #cbd5e1; border-right: 1px solid #f1f5f9; vertical-align: top; }
+  tr:nth-child(even) td { background: var(--bg-odd); }
+  .qty-cell { background: #eff6ff; text-align: center; font-weight: 700; color: var(--primary); }
 
   @media print {
-    body { padding: 0; }
-    .stat-card, .project-title, .daily-table th, .daily-table .total-row { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { background: white; margin: 0; padding: 0; }
+    .report-section { box-shadow: none; margin: 0; width: 100%; max-width: none; border: none; padding: 0 0 15px 0; }
+    .print-footer { position: fixed; bottom: 0; }
+    body { margin-top: 15px; margin-bottom: 25px; }
   }
 </style></head><body>
 
-<header>
-  <div>
-    <h1>Inbound Report</h1>
-    <p class="subtitle">${esc(params.frequency)} Summary - ${esc(dateRange)}</p>
-  </div>
-  <div class="meta">Generated: ${esc(generatedAt)}<br>Source: Master_Log</div>
-</header>
+<div class="print-header">${esc(params.frequency)} Report &nbsp;|&nbsp; ${esc(dateRange)}</div>
+<div class="print-footer">CONFIDENTIAL — Generated: ${esc(generatedAt)}</div>
 
-<div class="stat-banner">
-  <div class="stat-card"><span class="stat-val">${rows.length.toLocaleString()}</span><span class="stat-label">Total Lines</span></div>
-  <div class="stat-card"><span class="stat-val">${totalQty.toLocaleString()}</span><span class="stat-label">Total Units</span></div>
-  <div class="stat-card"><span class="stat-val">${uniqueBOLs.size}</span><span class="stat-label">Total BOLs</span></div>
+<div class="report-section page-break-after">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 3px solid #0f172a; padding-bottom:10px; margin-bottom:15px;">
+    <div>
+      <h1>Inbound Logistics Summary</h1>
+      <div style="color:#2563eb; font-weight:700; font-size:12px; margin-top:5px;">${esc(params.frequency)} Report • ${esc(dateRange)}</div>
+    </div>
+    <div class="meta-info">
+      <strong>Report ID:</strong> ${esc(reportId)}<br>
+      <strong>Generated:</strong> ${esc(generatedAt)}
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card"><span class="kpi-num">${uniqueBOLs.size}</span><span class="kpi-lbl">Total BOLs</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueFBPNs.size}</span><span class="kpi-lbl">Unique FBPNs</span></div>
+    <div class="kpi-card"><span class="kpi-num">${totalQty.toLocaleString()}</span><span class="kpi-lbl">Total Qty</span></div>
+  </div>
+
+  <h3 style="font-size:13px; text-transform:uppercase; margin-bottom:10px; color:#0f172a;">Project Breakdown Structure</h3>
+  <div class="hierarchy-box">${hierarchyHtml}</div>
 </div>
 
-<div class="section-title">Daily Activity Summary</div>
-${dailyTableHtml}
-
-<div class="section-title">Detailed Breakdown by Project</div>
-${detailHtml}
+<div class="report-section">
+  <h2>Detailed Delivery Overview</h2>
+  ${detailHtml}
+</div>
 
 </body></html>`;
 }
@@ -499,175 +492,172 @@ function buildOutboundReportHtml_(params, reportData) {
   const rows = reportData.rows || [];
   const dateRange = reportData.dateRange || `${params.startDate} - ${params.endDate}`;
   const generatedAt = new Date().toLocaleString();
+  const reportId = `${new Date().getFullYear()}-OUT-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
 
   // Calculate summary statistics
   let totalQty = 0;
   const uniqueCompanies = new Set();
   const uniqueTasks = new Set();
   const uniqueOrders = new Set();
+  const uniqueFBPNs = new Set();
   rows.forEach(r => {
     totalQty += Number(r.qty || 0) || 0;
     if (r.company) uniqueCompanies.add(r.company);
     if (r.taskNumber) uniqueTasks.add(r.taskNumber);
     if (r.orderNumber) uniqueOrders.add(r.orderNumber);
+    if (r.fbpn) uniqueFBPNs.add(r.fbpn);
   });
 
-  // Group by date -> company -> task
-  const groups = {};
+  // Group by company -> task
+  const companyGroups = {};
   rows.forEach(r => {
-    const d = r.date || '';
-    const company = (r.company || '').toString().trim() || 'Unknown Company';
+    const company = (r.company || '').toString().trim() || 'Unknown';
     const task = (r.taskNumber || '').toString().trim() || 'No Task';
-    groups[d] = groups[d] || {};
-    groups[d][company] = groups[d][company] || {};
-    groups[d][company][task] = groups[d][company][task] || [];
-    groups[d][company][task].push(r);
+    companyGroups[company] = companyGroups[company] || {};
+    companyGroups[company][task] = companyGroups[company][task] || [];
+    companyGroups[company][task].push(r);
   });
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  // Build daily summary data
-  const dailySummary = [];
-  Object.keys(groups).sort().forEach(dateKey => {
-    let dateTotal = 0, dateLines = 0;
-    const dateCompanies = new Set(), dateTasks = new Set(), dateOrders = new Set();
-    Object.keys(groups[dateKey]).forEach(company => {
-      dateCompanies.add(company);
-      Object.keys(groups[dateKey][company]).forEach(task => {
-        dateTasks.add(task);
-        const items = groups[dateKey][company][task];
-        dateLines += items.length;
-        items.forEach(x => {
-          dateTotal += Number(x.qty || 0) || 0;
-          if (x.orderNumber) dateOrders.add(x.orderNumber);
-        });
-      });
-    });
-    dailySummary.push({ date: dateKey, lines: dateLines, qty: dateTotal, companies: dateCompanies.size, tasks: dateTasks.size, orders: dateOrders.size });
-  });
-
-  // Build daily summary table
-  let dailyTableHtml = `
-    <table class="daily-table">
-      <thead>
-        <tr><th>Date</th><th>Lines</th><th>Units</th><th>Companies</th><th>Tasks</th><th>Orders</th></tr>
-      </thead>
-      <tbody>
-        ${dailySummary.map(d => `
-          <tr>
-            <td>${esc(d.date)}</td>
-            <td>${d.lines.toLocaleString()}</td>
-            <td>${d.qty.toLocaleString()}</td>
-            <td>${d.companies}</td>
-            <td>${d.tasks}</td>
-            <td>${d.orders}</td>
-          </tr>
-        `).join('')}
-        <tr class="total-row">
-          <td>TOTAL</td>
-          <td>${rows.length.toLocaleString()}</td>
-          <td>${totalQty.toLocaleString()}</td>
-          <td>${uniqueCompanies.size}</td>
-          <td>${uniqueTasks.size}</td>
-          <td>${uniqueOrders.size}</td>
-        </tr>
-      </tbody>
-    </table>`;
-
-  // Build detailed breakdown by company
-  let detailHtml = '';
-  Object.keys(groups).sort().forEach(dateKey => {
-    Object.keys(groups[dateKey]).sort().forEach(companyKey => {
-      detailHtml += `<div class="company-section"><div class="company-title">COMPANY: ${esc(companyKey)}</div>`;
-      const taskObj = groups[dateKey][companyKey];
-      Object.keys(taskObj).sort().forEach(taskKey => {
-        const items = taskObj[taskKey];
-        let taskTotal = 0;
-        items.forEach(x => taskTotal += Number(x.qty || 0) || 0);
-        detailHtml += `
-          <div class="task-container">
-            <div class="task-title">Task #${esc(taskKey)} <span class="task-summary">${items.length} lines | ${taskTotal.toLocaleString()} units</span></div>
-            <table class="data-table">
-              <thead>
-                <tr><th>Order #</th><th>FBPN</th><th>Qty</th><th>Project</th></tr>
-              </thead>
-              <tbody>
-                ${items.map(it => `
-                  <tr>
-                    <td><span class="pn-style">${esc(it.orderNumber)}</span></td>
-                    <td><span class="pn-style">${esc(it.fbpn)}</span></td>
-                    <td class="qty-val">${esc(it.qty)}</td>
-                    <td>${esc(it.project)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
+  // Build hierarchy HTML (Page 1)
+  let hierarchyHtml = '';
+  Object.keys(companyGroups).sort().forEach(companyKey => {
+    hierarchyHtml += `<div class="h-proj">${esc(companyKey)}</div>`;
+    const taskObj = companyGroups[companyKey];
+    Object.keys(taskObj).sort().forEach(taskKey => {
+      const items = taskObj[taskKey];
+      hierarchyHtml += `<div class="h-po-wrap"><div class="h-po-head">Task #: ${esc(taskKey)}</div>`;
+      items.forEach(item => {
+        hierarchyHtml += `
+          <div class="h-item">
+            <div><span class="lbl">Order:</span>${esc(item.orderNumber)}</div>
+            <div><span class="lbl">FBPN:</span>${esc(item.fbpn)}</div>
+            <div><span class="lbl">Project:</span>${esc(item.project)}</div>
+            <div style="text-align:right"><strong>${Number(item.qty || 0).toLocaleString()}</strong> <span class="lbl">QTY</span></div>
           </div>`;
       });
-      detailHtml += `</div>`;
+      hierarchyHtml += `</div>`;
     });
+  });
+
+  // Build detailed tables HTML (Page 2+)
+  let detailHtml = '';
+  Object.keys(companyGroups).sort().forEach(companyKey => {
+    const allItems = [];
+    Object.values(companyGroups[companyKey]).forEach(items => allItems.push(...items));
+    if (allItems.length === 0) return;
+
+    detailHtml += `
+      <div class="detail-block">
+        <div class="detail-head">COMPANY: ${esc(companyKey)}</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:10%">Date</th>
+              <th style="width:10%">Task #</th>
+              <th style="width:15%">Order #</th>
+              <th style="width:15%">FBPN</th>
+              <th style="width:8%">Qty</th>
+              <th style="width:15%">Project</th>
+              <th>Manufacturer</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${allItems.map(item => `
+              <tr>
+                <td>${esc(item.date)}</td>
+                <td>${esc(item.taskNumber)}</td>
+                <td>${esc(item.orderNumber)}</td>
+                <td>${esc(item.fbpn)}</td>
+                <td class="qty-cell">${Number(item.qty || 0).toLocaleString()}</td>
+                <td>${esc(item.project)}</td>
+                <td>${esc(item.manufacturer)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
   });
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Outbound Report</title>
 <style>
-  :root { --primary: #065f46; --accent: #10b981; --warning: #f97316; --bg: #f0fdf4; --border: #a7f3d0; }
-  @page { size: letter; margin: 0.5in; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #334155; margin: 0; padding: 20px; font-size: 10pt; }
+  @page { size: A4 landscape; margin: 15mm; }
+  :root { --primary: #065f46; --accent: #10b981; --success: #f97316; --border: #a7f3d0; --bg-odd: #f0fdf4; }
+  body { font-family: 'Segoe UI', 'Helvetica', sans-serif; background: white; margin: 0; padding: 10mm; color: #1e293b; -webkit-print-color-adjust: exact; font-size: 11px; }
 
-  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 4px solid var(--primary); padding-bottom: 15px; margin-bottom: 25px; }
-  h1 { margin: 0; font-size: 22px; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
-  .subtitle { margin: 5px 0 0 0; color: var(--accent); font-weight: 600; font-size: 12px; }
-  .meta { text-align: right; font-size: 11px; color: #64748b; }
+  .print-header { position: fixed; top: 0; right: 0; text-align: right; font-size: 10px; color: #64748b; width: 100%; }
+  .print-footer { position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #a7f3d0; padding-top: 5px; background: white; }
 
-  .stat-banner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
-  .stat-card { background: var(--bg); padding: 12px; border: 1px solid var(--border); text-align: center; border-radius: 4px; }
-  .stat-val { display: block; font-size: 20px; font-weight: 800; color: var(--primary); }
-  .stat-label { font-size: 10px; text-transform: uppercase; font-weight: 600; color: #64748b; }
+  .report-section { width: 100%; margin: 0 auto 20px auto; background: white; position: relative; }
+  .page-break-after { page-break-after: always; }
 
-  .section-title { font-size: 14px; font-weight: 700; color: var(--primary); margin: 25px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid var(--primary); }
+  h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px; color: var(--primary); }
+  h2 { font-size: 16px; color: var(--primary); border-bottom: 2px solid var(--primary); padding-bottom: 5px; margin-top: 0; margin-bottom: 15px; }
+  .meta-info { text-align: right; font-size: 11px; color: #475569; }
 
-  .daily-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-  .daily-table th { background: #f8fafc; padding: 10px; border: 1px solid #cbd5e1; font-size: 10px; text-transform: uppercase; color: #64748b; }
-  .daily-table td { padding: 10px; border: 1px solid #cbd5e1; text-align: center; font-size: 11px; }
-  .daily-table .total-row { background: var(--bg); font-weight: 800; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
+  .kpi-card { border: 2px solid var(--success); background: #fff7ed; padding: 15px; text-align: center; border-radius: 6px; }
+  .kpi-num { display: block; font-size: 28px; font-weight: 900; color: var(--success); }
+  .kpi-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #c2410c; }
 
-  .company-section { margin-bottom: 25px; page-break-inside: avoid; }
-  .company-title { background: var(--primary); color: white; padding: 10px 15px; font-size: 13px; font-weight: 700; border-radius: 4px 4px 0 0; }
-  .task-container { border-left: 3px solid var(--warning); margin-left: 10px; padding-left: 15px; margin-top: 12px; margin-bottom: 15px; }
-  .task-title { font-weight: 700; color: var(--warning); font-size: 12px; margin-bottom: 8px; }
-  .task-summary { float: right; font-weight: 500; color: #64748b; font-size: 11px; }
+  .hierarchy-box { border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin-bottom: 20px; }
+  .h-proj { background: var(--primary); color: white; padding: 8px 12px; font-weight: 700; font-size: 13px; }
+  .h-po-wrap { background: #fff; border-bottom: 1px solid var(--border); }
+  .h-po-wrap:last-child { border-bottom: none; }
+  .h-po-head { background: #f0fdf4; color: var(--success); padding: 6px 12px; font-size: 11px; font-weight: 700; border-bottom: 1px solid #d1fae5; }
+  .h-item { display: grid; grid-template-columns: 1.5fr 1.5fr 1.5fr 1fr; padding: 5px 12px 5px 25px; font-size: 10px; border-bottom: 1px dashed #e2e8f0; align-items: center; }
+  .h-item:last-child { border-bottom: none; }
+  .lbl { font-size: 8px; text-transform: uppercase; color: #64748b; margin-right: 4px; font-weight: 700; }
 
-  .data-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-  .data-table th { text-align: left; font-size: 9px; text-transform: uppercase; color: #64748b; padding: 8px; border-bottom: 1px solid #cbd5e1; background: #fafafa; }
-  .data-table td { padding: 8px; font-size: 11px; border-bottom: 1px dashed #e2e8f0; }
-  .pn-style { font-family: 'Consolas', monospace; background: #f1f5f9; padding: 2px 5px; border-radius: 3px; font-size: 10px; }
-  .qty-val { font-weight: 700; color: var(--warning); }
+  .detail-block { margin-bottom: 25px; border: 1px solid var(--border); page-break-inside: avoid; }
+  .detail-head { background: var(--primary); color: white; padding: 8px 12px; font-weight: 700; font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th { background: #f0fdf4; text-align: left; padding: 7px 5px; border-bottom: 2px solid #10b981; font-size: 10px; font-weight: 800; color: var(--primary); border-right: 1px solid #a7f3d0; }
+  td { padding: 6px 5px; border-bottom: 1px solid #d1fae5; border-right: 1px solid #f0fdf4; vertical-align: top; }
+  tr:nth-child(even) td { background: var(--bg-odd); }
+  .qty-cell { background: #fff7ed; text-align: center; font-weight: 700; color: var(--success); }
 
   @media print {
-    body { padding: 0; }
-    .stat-card, .company-title, .daily-table th, .daily-table .total-row { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { background: white; margin: 0; padding: 0; }
+    .report-section { box-shadow: none; margin: 0; width: 100%; max-width: none; border: none; padding: 0 0 15px 0; }
+    .print-footer { position: fixed; bottom: 0; }
+    body { margin-top: 15px; margin-bottom: 25px; }
   }
 </style></head><body>
 
-<header>
-  <div>
-    <h1>Outbound Report</h1>
-    <p class="subtitle">${esc(params.frequency)} Summary - ${esc(dateRange)}</p>
-  </div>
-  <div class="meta">Generated: ${esc(generatedAt)}<br>Source: OutboundLog</div>
-</header>
+<div class="print-header">${esc(params.frequency)} Report &nbsp;|&nbsp; ${esc(dateRange)}</div>
+<div class="print-footer">CONFIDENTIAL — Generated: ${esc(generatedAt)}</div>
 
-<div class="stat-banner">
-  <div class="stat-card"><span class="stat-val">${rows.length.toLocaleString()}</span><span class="stat-label">Total Lines</span></div>
-  <div class="stat-card"><span class="stat-val">${totalQty.toLocaleString()}</span><span class="stat-label">Total Units</span></div>
-  <div class="stat-card"><span class="stat-val">${uniqueOrders.size}</span><span class="stat-label">Total Orders</span></div>
+<div class="report-section page-break-after">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 3px solid #065f46; padding-bottom:10px; margin-bottom:15px;">
+    <div>
+      <h1>Outbound Logistics Summary</h1>
+      <div style="color:#10b981; font-weight:700; font-size:12px; margin-top:5px;">${esc(params.frequency)} Report • ${esc(dateRange)}</div>
+    </div>
+    <div class="meta-info">
+      <strong>Report ID:</strong> ${esc(reportId)}<br>
+      <strong>Generated:</strong> ${esc(generatedAt)}
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card"><span class="kpi-num">${uniqueOrders.size}</span><span class="kpi-lbl">Total Orders</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueFBPNs.size}</span><span class="kpi-lbl">Unique FBPNs</span></div>
+    <div class="kpi-card"><span class="kpi-num">${totalQty.toLocaleString()}</span><span class="kpi-lbl">Total Qty</span></div>
+  </div>
+
+  <h3 style="font-size:13px; text-transform:uppercase; margin-bottom:10px; color:#065f46;">Company Breakdown Structure</h3>
+  <div class="hierarchy-box">${hierarchyHtml}</div>
 </div>
 
-<div class="section-title">Daily Activity Summary</div>
-${dailyTableHtml}
-
-<div class="section-title">Detailed Breakdown by Company</div>
-${detailHtml}
+<div class="report-section">
+  <h2>Detailed Shipment Overview</h2>
+  ${detailHtml}
+</div>
 
 </body></html>`;
 }

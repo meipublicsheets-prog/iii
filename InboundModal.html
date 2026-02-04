@@ -994,6 +994,29 @@ function lookupProject() {
       if (result.success) {
         const htmlUrl = result.labelHtmlUrl;
         const pdfUrl = result.labelPdfUrl;
+        const tab3 = document.getElementById('tab3');
+
+        // Clean up existing alerts
+        const existingAlert = tab3.querySelector('.popup-alert');
+        if (existingAlert) existingAlert.remove();
+
+        // Check if labels were generated (URLs are valid)
+        if (!htmlUrl || !pdfUrl) {
+          // Labels weren't generated - show success without label links
+          const labelError = result.labelError || 'Check server logs for details.';
+          const noLabelsHtml = `
+            <div class="alert alert-warning popup-alert" style="text-align:center; margin-bottom:20px;">
+              <strong>Inbound Processed!</strong> Transaction ID: ${result.txnId || 'N/A'}
+              <div style="margin-top: 10px;">Labels were not generated: ${labelError}</div>
+            </div>
+          `;
+          tab3.insertAdjacentHTML('afterbegin', noLabelsHtml);
+          setTimeout(() => {
+            alert('Inbound delivery processed! (Labels were not generated: ' + labelError + ')');
+            google.script.host.close();
+          }, 2000);
+          return;
+        }
 
         // 1. Open HTML immediately
         const winHtml = window.open(htmlUrl, '_blank');
@@ -1001,20 +1024,15 @@ function lookupProject() {
         // 2. Open PDF with a delay
         setTimeout(() => {
           const winPdf = window.open(pdfUrl, '_blank');
-          
+
           // 3. Fallback if blocked
           if (!winHtml || !winPdf) {
-            const tab3 = document.getElementById('tab3');
-            // Clean up existing content first to avoid duplicates if called multiple times
-            const existingAlert = tab3.querySelector('.popup-alert');
-            if (existingAlert) existingAlert.remove();
-
             const fallbackHtml = `
               <div class="alert alert-warning popup-alert" style="text-align:center; margin-bottom:20px;">
                 <strong>Popups Blocked!</strong> Click below to access your labels:
                 <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
-                  <a href="${htmlUrl}" target="_blank" class="btn btn-primary">Open HTML</a>
-                  <a href="${pdfUrl}" target="_blank" class="btn btn-success">Download PDF</a>
+                  <a href="${htmlUrl}" target="_blank" class="btn btn-primary">Open HTML Labels</a>
+                  <a href="${pdfUrl}" target="_blank" class="btn btn-success">Download PDF Labels</a>
                 </div>
               </div>
             `;
@@ -1024,6 +1042,9 @@ function lookupProject() {
             google.script.host.close();
           }
         }, 600);
+      } else {
+        // Handle case where result.success is false
+        showAlert('Processing failed: ' + (result.message || 'Unknown error'), 'danger');
       }
     }
     

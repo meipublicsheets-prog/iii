@@ -438,9 +438,6 @@ function processInboundSubmission(payload) {
   const masterAggregation = {}; // { fbpn: { qty, ...info } }
 
   skidsData.forEach((skidEntry, index) => {
-    // Generate Random Skid ID (SKD-XXXXXXXX)
-    const skidId = generateRandomId('SKD-', 8);
-
     const skidItems = skidEntry.items || [{ fbpn: skidEntry.fbpn, qty: skidEntry.qty }];
 
     const currentBinIndex = binNumericBase + index;
@@ -448,7 +445,9 @@ function processInboundSubmission(payload) {
     const binName = `Inbound Staging - Skid ${currentBinIndex}`;
     const skidSequenceNum = index + 1;
 
-    skidItems.forEach(item => {
+    skidItems.forEach((item, itemIndex) => {
+      // Generate unique Skid ID per FBPN per skid (SKD-XXXXXXXX)
+      const skidId = generateRandomId('SKD-', 8);
       const fbpn = String(item.fbpn || '').toUpperCase().trim();
       const qty = parseFloat(item.qty) || 0;
       const manufacturer = basic.manufacturer || '';
@@ -613,20 +612,39 @@ function processInboundSubmission(payload) {
     }
   });
 
-  const labelResult = { labelsGenerated: false, labelFileUrl: '', labelHtmlUrl: '' };
+  const labelResult = { labelsGenerated: false, labelFileUrl: '', labelHtmlUrl: '', error: '' };
   if (options.generateLabels) {
     try {
-      let orderFolder2 = null;
-      try { orderFolder2 = createInboundFolder_(dateReceived, basic.bolNumber); } catch (e) {}
+      if (!labelData || labelData.length === 0) {
+        Logger.log('Label generation skipped: No label data available');
+        labelResult.error = 'No label data';
+      } else {
+        let orderFolder2 = null;
+        try {
+          orderFolder2 = createInboundFolder_(dateReceived, basic.bolNumber);
+        } catch (folderErr) {
+          Logger.log('Failed to create label folder: ' + folderErr.toString());
+        }
 
-      const res = generateSkidLabels(labelData, {
-        bolNumber: basic.bolNumber,
-        targetFolder: orderFolder2
-      });
-      labelResult.labelsGenerated = !!(res && res.success);
-      labelResult.labelFileUrl = (res && res.pdfUrl) ? res.pdfUrl : '';
-      labelResult.labelHtmlUrl = (res && res.htmlUrl) ? res.htmlUrl : '';
+        Logger.log('Generating labels for ' + labelData.length + ' items');
+        const res = generateSkidLabels(labelData, {
+          bolNumber: basic.bolNumber,
+          targetFolder: orderFolder2
+        });
+
+        labelResult.labelsGenerated = !!(res && res.success);
+        labelResult.labelFileUrl = (res && res.pdfUrl) ? res.pdfUrl : '';
+        labelResult.labelHtmlUrl = (res && res.htmlUrl) ? res.htmlUrl : '';
+
+        if (!res || !res.success) {
+          labelResult.error = (res && res.message) ? res.message : 'Unknown label generation error';
+          Logger.log('Label generation failed: ' + labelResult.error);
+        } else {
+          Logger.log('Labels generated successfully - HTML: ' + labelResult.labelHtmlUrl + ', PDF: ' + labelResult.labelFileUrl);
+        }
+      }
     } catch (e) {
+      labelResult.error = e.toString();
       Logger.log('Error generating labels: ' + e.toString());
     }
   }
@@ -637,7 +655,8 @@ function processInboundSubmission(payload) {
     totalSkids: skidsData.length,
     labelResult,
     labelPdfUrl: labelResult.labelFileUrl,
-    labelHtmlUrl: labelResult.labelHtmlUrl
+    labelHtmlUrl: labelResult.labelHtmlUrl,
+    labelError: labelResult.error || ''
   };
 }
 

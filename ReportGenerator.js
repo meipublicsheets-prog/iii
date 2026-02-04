@@ -66,6 +66,14 @@ function resolveAssetType_(rowAssetType, fbpn, assetMap) {
 // DATE RANGE PRESETS
 // ============================================================================
 
+function formatDateForFilename(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function getDateRangePreset(preset) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -297,504 +305,504 @@ function getOutboundReportData(params) {
 }
 
 // ============================================================================
-// HTML PORTRAIT GENERATION
+// HTML LANDSCAPE A4 GENERATION
 // ============================================================================
 
 function buildInboundReportHtml_(params, reportData) {
   const rows = reportData.rows || [];
-  const title = `${params.frequency} Inbound Report`;
   const dateRange = reportData.dateRange || `${params.startDate} - ${params.endDate}`;
   const generatedAt = new Date().toLocaleString();
+  const reportId = `INB-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
 
   // Calculate summary statistics
   let totalQty = 0;
   const uniqueProjects = new Set();
   const uniquePOs = new Set();
   const uniqueBOLs = new Set();
+  const uniqueFBPNs = new Set();
+  const uniqueCarriers = new Set();
+  const uniqueWarehouses = new Set();
+  const dailyData = {};
+  const projectQty = {};
+  const carrierQty = {};
+
   rows.forEach(r => {
-    totalQty += Number(r.qty || 0) || 0;
-    if (r.project) uniqueProjects.add(r.project);
+    const qty = Number(r.qty || 0) || 0;
+    totalQty += qty;
+    if (r.project) { uniqueProjects.add(r.project); projectQty[r.project] = (projectQty[r.project] || 0) + qty; }
     if (r.poNumber) uniquePOs.add(r.poNumber);
     if (r.bol) uniqueBOLs.add(r.bol);
+    if (r.fbpn) uniqueFBPNs.add(r.fbpn);
+    if (r.carrier) { uniqueCarriers.add(r.carrier); carrierQty[r.carrier] = (carrierQty[r.carrier] || 0) + qty; }
+    if (r.warehouse) uniqueWarehouses.add(r.warehouse);
+    const dateKey = r.dateReceived || 'Unknown';
+    dailyData[dateKey] = dailyData[dateKey] || { bols: new Set(), qty: 0 };
+    dailyData[dateKey].bols.add(r.bol);
+    dailyData[dateKey].qty += qty;
   });
 
-  const groups = {};
+  // Top projects and carriers for insights
+  const topProjects = Object.entries(projectQty).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topCarriers = Object.entries(carrierQty).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const avgDailyQty = Object.keys(dailyData).length > 0 ? Math.round(totalQty / Object.keys(dailyData).length) : 0;
+
+  // Group by project -> PO
+  const projectGroups = {};
   rows.forEach(r => {
-    const d = r.dateReceived || '';
-    const proj = (r.project || '').toString().trim() || 'Unassigned Project';
+    const proj = (r.project || '').toString().trim() || 'Unassigned';
     const po = (r.poNumber || '').toString().trim() || 'No PO';
-    const bol = (r.bol || '').toString().trim() || 'No BOL';
-    groups[d] = groups[d] || {};
-    groups[d][proj] = groups[d][proj] || {};
-    groups[d][proj][po] = groups[d][proj][po] || {};
-    groups[d][proj][po][bol] = groups[d][proj][po][bol] || [];
-    groups[d][proj][po][bol].push(r);
+    projectGroups[proj] = projectGroups[proj] || {};
+    projectGroups[proj][po] = projectGroups[proj][po] || [];
+    projectGroups[proj][po].push(r);
   });
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  // Build daily summary table data
-  const dailySummary = [];
-  Object.keys(groups).sort().forEach(dateKey => {
-    let dateTotal = 0;
-    let dateLines = 0;
-    const dateProjects = new Set();
-    const datePOs = new Set();
-    const dateBOLs = new Set();
-    Object.keys(groups[dateKey]).forEach(proj => {
-      dateProjects.add(proj);
-      Object.keys(groups[dateKey][proj]).forEach(po => {
-        datePOs.add(po);
-        Object.keys(groups[dateKey][proj][po]).forEach(bol => {
-          dateBOLs.add(bol);
-          const items = groups[dateKey][proj][po][bol];
-          dateLines += items.length;
-          items.forEach(x => dateTotal += Number(x.qty || 0) || 0);
-        });
-      });
-    });
-    dailySummary.push({ date: dateKey, lines: dateLines, qty: dateTotal, projects: dateProjects.size, pos: datePOs.size, bols: dateBOLs.size });
-  });
+  // Build daily trend table
+  const dailyTrendHtml = Object.entries(dailyData).sort((a, b) => a[0].localeCompare(b[0])).map(([date, data]) =>
+    `<tr><td>${esc(date)}</td><td class="num">${data.bols.size}</td><td class="num">${data.qty.toLocaleString()}</td></tr>`
+  ).join('');
 
-  // Build summary table HTML
-  let summaryTableHtml = `
-    <div class="summary-section">
-      <div class="summary-title">Daily Summary</div>
-      <table class="summary-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Lines</th>
-            <th>Units</th>
-            <th>Projects</th>
-            <th>POs</th>
-            <th>BOLs</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${dailySummary.map((d, idx) => `
-            <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-              <td class="date-cell">${esc(d.date)}</td>
-              <td>${d.lines.toLocaleString()}</td>
-              <td class="qty-cell">${d.qty.toLocaleString()}</td>
-              <td>${d.projects}</td>
-              <td>${d.pos}</td>
-              <td>${d.bols}</td>
+  // Build project summary table
+  const projectSummaryHtml = topProjects.map(([proj, qty], i) =>
+    `<tr><td>${i + 1}</td><td>${esc(proj)}</td><td class="num">${qty.toLocaleString()}</td><td class="num">${totalQty > 0 ? ((qty / totalQty) * 100).toFixed(1) : 0}%</td></tr>`
+  ).join('');
+
+  // Build detailed tables HTML
+  let detailHtml = '';
+  Object.keys(projectGroups).sort().forEach(projKey => {
+    const allItems = [];
+    Object.values(projectGroups[projKey]).forEach(items => allItems.push(...items));
+    if (allItems.length === 0) return;
+    const projTotal = allItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+    detailHtml += `
+      <div class="detail-block">
+        <div class="detail-head">
+          <span>${esc(projKey)}</span>
+          <span class="detail-head-stat">${allItems.length} items • ${projTotal.toLocaleString()} units</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:9%">Date</th>
+              <th style="width:6%">Whse</th>
+              <th style="width:10%">Manufacturer</th>
+              <th style="width:12%">FBPN</th>
+              <th style="width:10%">PO#</th>
+              <th style="width:10%">BOL#</th>
+              <th style="width:7%">Qty</th>
+              <th style="width:8%">Carrier</th>
+              <th>Asset Type</th>
             </tr>
-          `).join('')}
-          <tr class="total-row">
-            <td><strong>TOTAL</strong></td>
-            <td><strong>${rows.length.toLocaleString()}</strong></td>
-            <td class="qty-cell"><strong>${totalQty.toLocaleString()}</strong></td>
-            <td><strong>${uniqueProjects.size}</strong></td>
-            <td><strong>${uniquePOs.size}</strong></td>
-            <td><strong>${uniqueBOLs.size}</strong></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  // Build detailed breakdown by day
-  let bodyHtml = '<div class="detail-section"><div class="detail-title">Detailed Breakdown by Day</div>';
-  Object.keys(groups).sort().forEach(dateKey => {
-    let dateTotal = 0;
-    let dateLines = 0;
-    Object.values(groups[dateKey]).forEach(proj => {
-      Object.values(proj).forEach(po => {
-        Object.values(po).forEach(items => {
-          dateLines += items.length;
-          items.forEach(x => dateTotal += Number(x.qty || 0) || 0);
-        });
-      });
-    });
-
-    bodyHtml += `<div class="lvl-date"><div class="lvl-date-h"><span class="date-icon">&#128197;</span> ${esc(dateKey)}<span class="date-summary">${dateLines} lines | ${dateTotal.toLocaleString()} units</span></div>`;
-    const projObj = groups[dateKey];
-    Object.keys(projObj).sort().forEach(projKey => {
-      let projTotal = 0;
-      let projLines = 0;
-      Object.values(projObj[projKey]).forEach(po => {
-        Object.values(po).forEach(items => {
-          projLines += items.length;
-          items.forEach(x => projTotal += Number(x.qty || 0) || 0);
-        });
-      });
-
-      bodyHtml += `<div class="lvl-project"><div class="lvl-project-h"><span class="project-label">PROJECT</span> ${esc(projKey)}<span class="project-summary">${projLines} lines | ${projTotal.toLocaleString()} units</span></div>`;
-      const poObj = projObj[projKey];
-      Object.keys(poObj).sort().forEach(poKey => {
-        bodyHtml += `<div class="lvl-po"><div class="lvl-po-h"><span class="po-label">PO#</span> ${esc(poKey)}</div>`;
-        const bolObj = poObj[poKey];
-        Object.keys(bolObj).sort().forEach(bolKey => {
-          const items = bolObj[bolKey];
-          let bolTotal = 0;
-          items.forEach(x => bolTotal += Number(x.qty || 0) || 0);
-          bodyHtml += `
-            <div class="lvl-bol">
-              <div class="lvl-bol-h">
-                <div><span class="bol-label">BOL</span> ${esc(bolKey)}</div>
-                <div class="bol-stats"><span class="stat-badge">${items.length} lines</span><span class="stat-badge qty-badge">${bolTotal.toLocaleString()} units</span></div>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Push #</th>
-                    <th>Asset Type</th>
-                    <th>FBPN</th>
-                    <th>Qty</th>
-                    <th>Carrier</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${items.map((it, idx) => `
-                    <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-                      <td>${esc(it.push)}</td>
-                      <td>${esc(it.assetType || '')}</td>
-                      <td class="mono">${esc(it.fbpn)}</td>
-                      <td class="qty-cell">${esc(it.qty)}</td>
-                      <td>${esc(it.carrier)}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>`;
-        });
-        bodyHtml += `</div>`;
-      });
-      bodyHtml += `</div>`;
-    });
-    bodyHtml += `</div>`;
+          </thead>
+          <tbody>
+            ${allItems.map(item => `
+              <tr>
+                <td>${esc(item.dateReceived)}</td>
+                <td>${esc(item.warehouse)}</td>
+                <td>${esc(item.manufacturer)}</td>
+                <td class="mono">${esc(item.fbpn)}</td>
+                <td class="mono">${esc(item.poNumber)}</td>
+                <td class="mono">${esc(item.bol)}</td>
+                <td class="qty-cell">${Number(item.qty || 0).toLocaleString()}</td>
+                <td>${esc(item.carrier)}</td>
+                <td>${esc(item.assetType || '')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
   });
-  bodyHtml += '</div>';
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    @page { size: letter; margin: 0.5in; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9pt; line-height: 1.4; color: #1f2937; margin: 0; background: #fff; }
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Inbound Logistics Report</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm 15mm; }
+  :root { --primary: #1e3a5f; --accent: #0ea5e9; --success: #059669; --warn: #d97706; --border: #e2e8f0; --bg-light: #f8fafc; --text: #334155; --text-muted: #64748b; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; background: #fff; margin: 0; padding: 8mm; color: var(--text); font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-    /* Header Styles */
-    .report-header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #fff; padding: 20px; margin: -0.5in -0.5in 20px -0.5in; }
-    .header-content { display: flex; justify-content: space-between; align-items: center; max-width: 100%; }
-    .title { font-size: 20pt; font-weight: 700; letter-spacing: -0.5px; }
-    .subtitle { font-size: 9pt; opacity: 0.9; margin-top: 4px; }
-    .header-right { text-align: right; }
-    .date-range { font-size: 10pt; font-weight: 600; }
-    .generated { font-size: 8pt; opacity: 0.8; margin-top: 4px; }
+  /* Header Bar */
+  .header-bar { background: linear-gradient(135deg, var(--primary) 0%, #0f172a 100%); color: white; padding: 20px 25px; margin: -8mm -8mm 20px -8mm; display: flex; justify-content: space-between; align-items: center; }
+  .header-bar h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .header-bar .subtitle { opacity: 0.85; font-size: 12px; margin-top: 4px; }
+  .header-bar .meta { text-align: right; font-size: 10px; opacity: 0.9; }
+  .header-bar .meta strong { display: block; font-size: 11px; }
 
-    /* Summary Section */
-    .summary-section { margin-bottom: 24px; page-break-after: auto; }
-    .summary-title { font-size: 14pt; font-weight: 700; color: #1e40af; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #1e40af; }
-    .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    .summary-table th { text-align: center; font-size: 9pt; background: #1e40af; color: #fff; padding: 10px 8px; border: 1px solid #1e3a8a; font-weight: 600; text-transform: uppercase; }
-    .summary-table td { padding: 10px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 500; }
-    .summary-table .date-cell { font-weight: 600; color: #1e3a8a; text-align: left; padding-left: 12px; }
-    .summary-table .row-even td { background: #f8fafc; }
-    .summary-table .row-odd td { background: #ffffff; }
-    .summary-table .total-row td { background: #e0e7ff; border-top: 2px solid #1e40af; }
-    .summary-table .qty-cell { color: #166534; font-weight: 700; }
+  /* Executive Summary Card */
+  .exec-summary { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .exec-title { font-size: 14px; font-weight: 700; color: var(--primary); margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid var(--accent); display: flex; align-items: center; gap: 8px; }
+  .exec-title::before { content: ''; width: 4px; height: 18px; background: var(--accent); border-radius: 2px; }
 
-    /* Detail Section */
-    .detail-section { margin-top: 20px; }
-    .detail-title { font-size: 14pt; font-weight: 700; color: #1e40af; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1e40af; }
+  /* KPI Grid */
+  .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; margin-bottom: 20px; }
+  .kpi-card { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 15px; text-align: center; position: relative; overflow: hidden; }
+  .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
+  .kpi-card.highlight::before { background: var(--success); }
+  .kpi-num { display: block; font-size: 26px; font-weight: 800; color: var(--primary); margin-bottom: 4px; }
+  .kpi-lbl { font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
 
-    /* Date Level - Primary grouping */
-    .lvl-date { margin-bottom: 20px; }
-    .lvl-date-h { font-size: 12pt; font-weight: 700; padding: 12px 16px; background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%); color: #fff; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; page-break-after: avoid; }
-    .date-icon { margin-right: 8px; }
-    .date-summary { font-size: 9pt; font-weight: 500; opacity: 0.9; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 12px; }
+  /* Insights Panel */
+  .insights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .insight-card { background: var(--bg-light); border-radius: 6px; padding: 15px; }
+  .insight-card h4 { margin: 0 0 12px 0; font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.5px; }
+  .insight-list { margin: 0; padding: 0; list-style: none; }
+  .insight-list li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 10px; display: flex; justify-content: space-between; }
+  .insight-list li:last-child { border-bottom: none; }
+  .insight-list .label { color: var(--text-muted); }
+  .insight-list .value { font-weight: 700; color: var(--primary); }
 
-    /* Project Level */
-    .lvl-project { margin: 0 0 12px 0; border-left: 4px solid #2563eb; background: #f8fafc; }
-    .lvl-project-h { font-weight: 600; padding: 10px 16px; font-size: 10pt; display: flex; align-items: center; gap: 8px; background: #e0e7ff; color: #1e3a8a; page-break-after: avoid; }
-    .project-label { background: #1e40af; color: #fff; font-size: 7pt; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
-    .project-summary { margin-left: auto; font-size: 8pt; color: #4b5563; font-weight: 500; }
+  /* Trend Table */
+  .trend-section { margin-bottom: 20px; }
+  .trend-section h3 { font-size: 12px; font-weight: 700; color: var(--primary); margin: 0 0 10px 0; }
+  .trend-table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  .trend-table th { background: var(--primary); color: white; padding: 8px 10px; text-align: left; font-weight: 600; }
+  .trend-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  .trend-table tr:nth-child(even) td { background: var(--bg-light); }
+  .trend-table .num { text-align: right; font-weight: 600; font-family: 'SF Mono', 'Consolas', monospace; }
 
-    /* PO Level */
-    .lvl-po { page-break-inside: avoid; margin: 8px 16px 12px 16px; }
-    .lvl-po-h { font-weight: 600; padding: 8px 12px; background: #7c3aed; color: #fff; border-radius: 6px 6px 0 0; font-size: 9pt; display: flex; align-items: center; gap: 8px; }
-    .po-label { background: rgba(255,255,255,0.25); font-size: 7pt; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
+  /* Page Break */
+  .page-break { page-break-after: always; margin-bottom: 0; }
 
-    /* BOL Level */
-    .lvl-bol { page-break-inside: avoid; margin: 0 0 8px 0; border: 1px solid #e5e7eb; border-radius: 0 0 6px 6px; overflow: hidden; }
-    .lvl-bol-h { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 9pt; font-weight: 600; background: #faf5ff; color: #6b21a8; border-bottom: 1px solid #e9d5ff; }
-    .bol-label { background: #a855f7; color: #fff; font-size: 7pt; padding: 2px 6px; border-radius: 4px; font-weight: 700; margin-right: 6px; }
-    .bol-stats { display: flex; gap: 6px; }
-    .stat-badge { font-size: 8pt; padding: 3px 8px; background: #f3e8ff; border-radius: 10px; color: #7c3aed; font-weight: 600; }
-    .qty-badge { background: #dcfce7; color: #166534; }
+  /* Detail Section */
+  .detail-section { margin-top: 20px; }
+  .detail-section h2 { font-size: 16px; font-weight: 700; color: var(--primary); margin: 0 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid var(--primary); }
+  .detail-block { margin-bottom: 20px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; page-break-inside: avoid; }
+  .detail-head { background: var(--primary); color: white; padding: 10px 15px; font-weight: 700; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .detail-head-stat { font-size: 10px; opacity: 0.85; font-weight: 500; }
 
-    /* Table Styles */
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th { text-align: center; font-size: 8pt; background: #f1f5f9; color: #475569; padding: 8px 6px; border: 1px solid #cbd5e1; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
-    td { padding: 8px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 500; word-wrap: break-word; }
-    .row-even td { background: #ffffff; }
-    .row-odd td { background: #f8fafc; }
-    .mono { font-family: 'Consolas', 'Monaco', monospace; font-size: 8.5pt; color: #0f172a; }
-    .qty-cell { font-weight: 700; color: #166534; }
+  /* Data Table */
+  table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  thead { display: table-header-group; }
+  th { background: #f1f5f9; text-align: left; padding: 8px 6px; font-size: 9px; font-weight: 700; color: var(--primary); border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: 0.3px; }
+  td { padding: 7px 6px; border-bottom: 1px solid #f1f5f9; }
+  tr:nth-child(even) td { background: var(--bg-light); }
+  .qty-cell { background: #ecfdf5 !important; text-align: center; font-weight: 700; color: var(--success); }
+  .mono { font-family: 'SF Mono', 'Consolas', monospace; font-size: 9px; }
 
-    /* Print optimizations */
-    @media print {
-      .report-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .summary-table th, .summary-table .total-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .lvl-date-h, .lvl-project-h, .lvl-po-h, .lvl-bol-h, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  </style></head><body>
-  <div class="report-header">
-    <div class="header-content">
-      <div>
-        <div class="title">INBOUND REPORT</div>
-        <div class="subtitle">${esc(params.frequency)} Summary</div>
-      </div>
-      <div class="header-right">
-        <div class="date-range">${esc(dateRange)}</div>
-        <div class="generated">Generated: ${esc(generatedAt)}</div>
-      </div>
+  /* Footer */
+  .page-footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 15mm; font-size: 8px; color: var(--text-muted); border-top: 1px solid var(--border); background: white; display: flex; justify-content: space-between; }
+
+  @media print {
+    body { padding: 0; margin: 0; }
+    .header-bar { margin: 0 0 20px 0; }
+    .page-footer { position: fixed; bottom: 0; }
+  }
+</style></head><body>
+
+<div class="header-bar">
+  <div>
+    <h1>Inbound Logistics Report</h1>
+    <div class="subtitle">${esc(params.frequency)} Analysis • ${esc(dateRange)}</div>
+  </div>
+  <div class="meta">
+    <strong>${esc(reportId)}</strong>
+    Generated: ${esc(generatedAt)}
+  </div>
+</div>
+
+<div class="exec-summary">
+  <div class="exec-title">Executive Summary</div>
+  <div class="kpi-grid">
+    <div class="kpi-card highlight"><span class="kpi-num">${totalQty.toLocaleString()}</span><span class="kpi-lbl">Total Units Received</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueBOLs.size}</span><span class="kpi-lbl">Shipments (BOLs)</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniquePOs.size}</span><span class="kpi-lbl">Purchase Orders</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueFBPNs.size}</span><span class="kpi-lbl">Unique SKUs</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueProjects.size}</span><span class="kpi-lbl">Active Projects</span></div>
+    <div class="kpi-card"><span class="kpi-num">${avgDailyQty.toLocaleString()}</span><span class="kpi-lbl">Avg Daily Volume</span></div>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card">
+      <h4>Top Projects by Volume</h4>
+      <ul class="insight-list">
+        ${topProjects.map(([proj, qty]) => `<li><span class="label">${esc(proj)}</span><span class="value">${qty.toLocaleString()} units</span></li>`).join('')}
+        ${topProjects.length === 0 ? '<li><span class="label">No data</span></li>' : ''}
+      </ul>
+    </div>
+    <div class="insight-card">
+      <h4>Top Carriers</h4>
+      <ul class="insight-list">
+        ${topCarriers.map(([carrier, qty]) => `<li><span class="label">${esc(carrier)}</span><span class="value">${qty.toLocaleString()} units</span></li>`).join('')}
+        ${topCarriers.length === 0 ? '<li><span class="label">No data</span></li>' : ''}
+      </ul>
     </div>
   </div>
-  ${summaryTableHtml}
-  ${bodyHtml}
+
+  <div class="trend-section">
+    <h3>Daily Receiving Trend</h3>
+    <table class="trend-table">
+      <thead><tr><th>Date</th><th>Shipments</th><th>Quantity</th></tr></thead>
+      <tbody>${dailyTrendHtml || '<tr><td colspan="3">No daily data</td></tr>'}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="page-break"></div>
+
+<div class="detail-section">
+  <h2>Detailed Receiving Log</h2>
+  ${detailHtml}
+</div>
+
+<div class="page-footer">
+  <span>CONFIDENTIAL — Internal Use Only</span>
+  <span>Report: ${esc(reportId)} | Generated: ${esc(generatedAt)}</span>
+</div>
+
 </body></html>`;
 }
 
 function buildOutboundReportHtml_(params, reportData) {
   const rows = reportData.rows || [];
-  const title = `${params.frequency} Outbound Report`;
   const dateRange = reportData.dateRange || `${params.startDate} - ${params.endDate}`;
   const generatedAt = new Date().toLocaleString();
+  const reportId = `OUT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
 
   // Calculate summary statistics
   let totalQty = 0;
   const uniqueCompanies = new Set();
   const uniqueTasks = new Set();
   const uniqueOrders = new Set();
+  const uniqueFBPNs = new Set();
+  const uniqueProjects = new Set();
+  const dailyData = {};
+  const companyQty = {};
+  const projectQty = {};
+
   rows.forEach(r => {
-    totalQty += Number(r.qty || 0) || 0;
-    if (r.company) uniqueCompanies.add(r.company);
+    const qty = Number(r.qty || 0) || 0;
+    totalQty += qty;
+    if (r.company) { uniqueCompanies.add(r.company); companyQty[r.company] = (companyQty[r.company] || 0) + qty; }
     if (r.taskNumber) uniqueTasks.add(r.taskNumber);
     if (r.orderNumber) uniqueOrders.add(r.orderNumber);
+    if (r.fbpn) uniqueFBPNs.add(r.fbpn);
+    if (r.project) { uniqueProjects.add(r.project); projectQty[r.project] = (projectQty[r.project] || 0) + qty; }
+    const dateKey = r.date || 'Unknown';
+    dailyData[dateKey] = dailyData[dateKey] || { orders: new Set(), qty: 0 };
+    dailyData[dateKey].orders.add(r.orderNumber);
+    dailyData[dateKey].qty += qty;
   });
 
-  const groups = {};
+  // Top companies and projects for insights
+  const topCompanies = Object.entries(companyQty).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topProjects = Object.entries(projectQty).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const avgDailyQty = Object.keys(dailyData).length > 0 ? Math.round(totalQty / Object.keys(dailyData).length) : 0;
+
+  // Group by company -> task
+  const companyGroups = {};
   rows.forEach(r => {
-    const d = r.date || '';
-    const company = (r.company || '').toString().trim() || 'Unknown Company';
+    const company = (r.company || '').toString().trim() || 'Unknown';
     const task = (r.taskNumber || '').toString().trim() || 'No Task';
-    groups[d] = groups[d] || {};
-    groups[d][company] = groups[d][company] || {};
-    groups[d][company][task] = groups[d][company][task] || [];
-    groups[d][company][task].push(r);
+    companyGroups[company] = companyGroups[company] || {};
+    companyGroups[company][task] = companyGroups[company][task] || [];
+    companyGroups[company][task].push(r);
   });
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  // Build daily summary table data
-  const dailySummary = [];
-  Object.keys(groups).sort().forEach(dateKey => {
-    let dateTotal = 0;
-    let dateLines = 0;
-    const dateCompanies = new Set();
-    const dateTasks = new Set();
-    const dateOrders = new Set();
-    Object.keys(groups[dateKey]).forEach(company => {
-      dateCompanies.add(company);
-      Object.keys(groups[dateKey][company]).forEach(task => {
-        dateTasks.add(task);
-        const items = groups[dateKey][company][task];
-        dateLines += items.length;
-        items.forEach(x => {
-          dateTotal += Number(x.qty || 0) || 0;
-          if (x.orderNumber) dateOrders.add(x.orderNumber);
-        });
-      });
-    });
-    dailySummary.push({ date: dateKey, lines: dateLines, qty: dateTotal, companies: dateCompanies.size, tasks: dateTasks.size, orders: dateOrders.size });
-  });
+  // Build daily trend table
+  const dailyTrendHtml = Object.entries(dailyData).sort((a, b) => a[0].localeCompare(b[0])).map(([date, data]) =>
+    `<tr><td>${esc(date)}</td><td class="num">${data.orders.size}</td><td class="num">${data.qty.toLocaleString()}</td></tr>`
+  ).join('');
 
-  // Build summary table HTML
-  let summaryTableHtml = `
-    <div class="summary-section">
-      <div class="summary-title">Daily Summary</div>
-      <table class="summary-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Lines</th>
-            <th>Units</th>
-            <th>Companies</th>
-            <th>Tasks</th>
-            <th>Orders</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${dailySummary.map((d, idx) => `
-            <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-              <td class="date-cell">${esc(d.date)}</td>
-              <td>${d.lines.toLocaleString()}</td>
-              <td class="qty-cell">${d.qty.toLocaleString()}</td>
-              <td>${d.companies}</td>
-              <td>${d.tasks}</td>
-              <td>${d.orders}</td>
+  // Build company summary table
+  const companySummaryHtml = topCompanies.map(([company, qty], i) =>
+    `<tr><td>${i + 1}</td><td>${esc(company)}</td><td class="num">${qty.toLocaleString()}</td><td class="num">${totalQty > 0 ? ((qty / totalQty) * 100).toFixed(1) : 0}%</td></tr>`
+  ).join('');
+
+  // Build detailed tables HTML
+  let detailHtml = '';
+  Object.keys(companyGroups).sort().forEach(companyKey => {
+    const allItems = [];
+    Object.values(companyGroups[companyKey]).forEach(items => allItems.push(...items));
+    if (allItems.length === 0) return;
+    const compTotal = allItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+
+    detailHtml += `
+      <div class="detail-block">
+        <div class="detail-head">
+          <span>${esc(companyKey)}</span>
+          <span class="detail-head-stat">${allItems.length} items • ${compTotal.toLocaleString()} units</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:10%">Date</th>
+              <th style="width:10%">Task #</th>
+              <th style="width:14%">Order #</th>
+              <th style="width:14%">FBPN</th>
+              <th style="width:8%">Qty</th>
+              <th style="width:14%">Project</th>
+              <th>Manufacturer</th>
             </tr>
-          `).join('')}
-          <tr class="total-row">
-            <td><strong>TOTAL</strong></td>
-            <td><strong>${rows.length.toLocaleString()}</strong></td>
-            <td class="qty-cell"><strong>${totalQty.toLocaleString()}</strong></td>
-            <td><strong>${uniqueCompanies.size}</strong></td>
-            <td><strong>${uniqueTasks.size}</strong></td>
-            <td><strong>${uniqueOrders.size}</strong></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  // Build detailed breakdown by day
-  let bodyHtml = '<div class="detail-section"><div class="detail-title">Detailed Breakdown by Day</div>';
-  Object.keys(groups).sort().forEach(dateKey => {
-    let dateTotal = 0;
-    let dateLines = 0;
-    Object.values(groups[dateKey]).forEach(company => {
-      Object.values(company).forEach(items => {
-        dateLines += items.length;
-        items.forEach(x => dateTotal += Number(x.qty || 0) || 0);
-      });
-    });
-
-    bodyHtml += `<div class="lvl-date"><div class="lvl-date-h"><span class="date-icon">&#128197;</span> ${esc(dateKey)}<span class="date-summary">${dateLines} lines | ${dateTotal.toLocaleString()} units</span></div>`;
-    const companyObj = groups[dateKey];
-    Object.keys(companyObj).sort().forEach(companyKey => {
-      let companyTotal = 0;
-      let companyLines = 0;
-      Object.values(companyObj[companyKey]).forEach(items => {
-        companyLines += items.length;
-        items.forEach(x => companyTotal += Number(x.qty || 0) || 0);
-      });
-
-      bodyHtml += `<div class="lvl-company"><div class="lvl-company-h"><span class="company-label">COMPANY</span> ${esc(companyKey)}<span class="company-summary">${companyLines} lines | ${companyTotal.toLocaleString()} units</span></div>`;
-      const taskObj = companyObj[companyKey];
-      Object.keys(taskObj).sort().forEach(taskKey => {
-        const items = taskObj[taskKey];
-        let taskTotal = 0;
-        items.forEach(x => taskTotal += Number(x.qty || 0) || 0);
-        bodyHtml += `
-          <div class="lvl-task">
-            <div class="lvl-task-h">
-              <div><span class="task-label">TASK#</span> ${esc(taskKey)}</div>
-              <div class="task-stats"><span class="stat-badge">${items.length} lines</span><span class="stat-badge qty-badge">${taskTotal.toLocaleString()} units</span></div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Order #</th>
-                  <th>FBPN</th>
-                  <th>Qty</th>
-                  <th>Project</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map((it, idx) => `
-                  <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-                    <td class="mono">${esc(it.orderNumber)}</td>
-                    <td class="mono">${esc(it.fbpn)}</td>
-                    <td class="qty-cell">${esc(it.qty)}</td>
-                    <td>${esc(it.project)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>`;
-      });
-      bodyHtml += `</div>`;
-    });
-    bodyHtml += `</div>`;
+          </thead>
+          <tbody>
+            ${allItems.map(item => `
+              <tr>
+                <td>${esc(item.date)}</td>
+                <td class="mono">${esc(item.taskNumber)}</td>
+                <td class="mono">${esc(item.orderNumber)}</td>
+                <td class="mono">${esc(item.fbpn)}</td>
+                <td class="qty-cell">${Number(item.qty || 0).toLocaleString()}</td>
+                <td>${esc(item.project)}</td>
+                <td>${esc(item.manufacturer)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
   });
-  bodyHtml += '</div>';
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    @page { size: letter; margin: 0.5in; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9pt; line-height: 1.4; color: #1f2937; margin: 0; background: #fff; }
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Outbound Logistics Report</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm 15mm; }
+  :root { --primary: #065f46; --accent: #10b981; --success: #f97316; --warn: #dc2626; --border: #d1fae5; --bg-light: #f0fdf4; --text: #334155; --text-muted: #64748b; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; background: #fff; margin: 0; padding: 8mm; color: var(--text); font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-    /* Header Styles - Teal/Green theme for Outbound */
-    .report-header { background: linear-gradient(135deg, #065f46 0%, #10b981 100%); color: #fff; padding: 20px; margin: -0.5in -0.5in 20px -0.5in; }
-    .header-content { display: flex; justify-content: space-between; align-items: center; max-width: 100%; }
-    .title { font-size: 20pt; font-weight: 700; letter-spacing: -0.5px; }
-    .subtitle { font-size: 9pt; opacity: 0.9; margin-top: 4px; }
-    .header-right { text-align: right; }
-    .date-range { font-size: 10pt; font-weight: 600; }
-    .generated { font-size: 8pt; opacity: 0.8; margin-top: 4px; }
+  /* Header Bar */
+  .header-bar { background: linear-gradient(135deg, var(--primary) 0%, #064e3b 100%); color: white; padding: 20px 25px; margin: -8mm -8mm 20px -8mm; display: flex; justify-content: space-between; align-items: center; }
+  .header-bar h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .header-bar .subtitle { opacity: 0.85; font-size: 12px; margin-top: 4px; }
+  .header-bar .meta { text-align: right; font-size: 10px; opacity: 0.9; }
+  .header-bar .meta strong { display: block; font-size: 11px; }
 
-    /* Summary Section */
-    .summary-section { margin-bottom: 24px; page-break-after: auto; }
-    .summary-title { font-size: 14pt; font-weight: 700; color: #065f46; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #065f46; }
-    .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    .summary-table th { text-align: center; font-size: 9pt; background: #065f46; color: #fff; padding: 10px 8px; border: 1px solid #064e3b; font-weight: 600; text-transform: uppercase; }
-    .summary-table td { padding: 10px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 500; }
-    .summary-table .date-cell { font-weight: 600; color: #064e3b; text-align: left; padding-left: 12px; }
-    .summary-table .row-even td { background: #f0fdf4; }
-    .summary-table .row-odd td { background: #ffffff; }
-    .summary-table .total-row td { background: #d1fae5; border-top: 2px solid #065f46; }
-    .summary-table .qty-cell { color: #c2410c; font-weight: 700; }
+  /* Executive Summary Card */
+  .exec-summary { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .exec-title { font-size: 14px; font-weight: 700; color: var(--primary); margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid var(--accent); display: flex; align-items: center; gap: 8px; }
+  .exec-title::before { content: ''; width: 4px; height: 18px; background: var(--accent); border-radius: 2px; }
 
-    /* Detail Section */
-    .detail-section { margin-top: 20px; }
-    .detail-title { font-size: 14pt; font-weight: 700; color: #065f46; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #065f46; }
+  /* KPI Grid */
+  .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 15px; margin-bottom: 20px; }
+  .kpi-card { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 15px; text-align: center; position: relative; overflow: hidden; }
+  .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
+  .kpi-card.highlight::before { background: var(--success); }
+  .kpi-num { display: block; font-size: 26px; font-weight: 800; color: var(--primary); margin-bottom: 4px; }
+  .kpi-lbl { font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
 
-    /* Date Level - Primary grouping */
-    .lvl-date { margin-bottom: 20px; }
-    .lvl-date-h { font-size: 12pt; font-weight: 700; padding: 12px 16px; background: linear-gradient(135deg, #064e3b 0%, #059669 100%); color: #fff; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; page-break-after: avoid; }
-    .date-icon { margin-right: 8px; }
-    .date-summary { font-size: 9pt; font-weight: 500; opacity: 0.9; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 12px; }
+  /* Insights Panel */
+  .insights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .insight-card { background: var(--bg-light); border-radius: 6px; padding: 15px; }
+  .insight-card h4 { margin: 0 0 12px 0; font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.5px; }
+  .insight-list { margin: 0; padding: 0; list-style: none; }
+  .insight-list li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 10px; display: flex; justify-content: space-between; }
+  .insight-list li:last-child { border-bottom: none; }
+  .insight-list .label { color: var(--text-muted); }
+  .insight-list .value { font-weight: 700; color: var(--primary); }
 
-    /* Company Level */
-    .lvl-company { margin: 0 0 12px 0; border-left: 4px solid #10b981; background: #f0fdf4; }
-    .lvl-company-h { font-weight: 600; padding: 10px 16px; font-size: 10pt; display: flex; align-items: center; gap: 8px; background: #d1fae5; color: #064e3b; page-break-after: avoid; }
-    .company-label { background: #065f46; color: #fff; font-size: 7pt; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
-    .company-summary { margin-left: auto; font-size: 8pt; color: #4b5563; font-weight: 500; }
+  /* Trend Table */
+  .trend-section { margin-bottom: 20px; }
+  .trend-section h3 { font-size: 12px; font-weight: 700; color: var(--primary); margin: 0 0 10px 0; }
+  .trend-table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  .trend-table th { background: var(--primary); color: white; padding: 8px 10px; text-align: left; font-weight: 600; }
+  .trend-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  .trend-table tr:nth-child(even) td { background: var(--bg-light); }
+  .trend-table .num { text-align: right; font-weight: 600; font-family: 'SF Mono', 'Consolas', monospace; }
 
-    /* Task Level */
-    .lvl-task { page-break-inside: avoid; margin: 8px 16px 12px 16px; border: 1px solid #d1fae5; border-radius: 6px; overflow: hidden; }
-    .lvl-task-h { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 9pt; font-weight: 600; background: #f97316; color: #fff; }
-    .task-label { background: rgba(255,255,255,0.25); font-size: 7pt; padding: 2px 6px; border-radius: 4px; font-weight: 700; margin-right: 6px; }
-    .task-stats { display: flex; gap: 6px; }
-    .stat-badge { font-size: 8pt; padding: 3px 8px; background: rgba(255,255,255,0.25); border-radius: 10px; color: #fff; font-weight: 600; }
-    .qty-badge { background: rgba(255,255,255,0.35); }
+  /* Page Break */
+  .page-break { page-break-after: always; margin-bottom: 0; }
 
-    /* Table Styles */
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th { text-align: center; font-size: 8pt; background: #f1f5f9; color: #475569; padding: 8px 6px; border: 1px solid #cbd5e1; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
-    td { padding: 8px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 500; word-wrap: break-word; }
-    .row-even td { background: #ffffff; }
-    .row-odd td { background: #f0fdf4; }
-    .mono { font-family: 'Consolas', 'Monaco', monospace; font-size: 8.5pt; color: #0f172a; }
-    .qty-cell { font-weight: 700; color: #c2410c; }
+  /* Detail Section */
+  .detail-section { margin-top: 20px; }
+  .detail-section h2 { font-size: 16px; font-weight: 700; color: var(--primary); margin: 0 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid var(--primary); }
+  .detail-block { margin-bottom: 20px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; page-break-inside: avoid; }
+  .detail-head { background: var(--primary); color: white; padding: 10px 15px; font-weight: 700; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .detail-head-stat { font-size: 10px; opacity: 0.85; font-weight: 500; }
 
-    /* Print optimizations */
-    @media print {
-      .report-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .summary-table th, .summary-table .total-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .lvl-date-h, .lvl-company-h, .lvl-task-h, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  </style></head><body>
-  <div class="report-header">
-    <div class="header-content">
-      <div>
-        <div class="title">OUTBOUND REPORT</div>
-        <div class="subtitle">${esc(params.frequency)} Summary</div>
-      </div>
-      <div class="header-right">
-        <div class="date-range">${esc(dateRange)}</div>
-        <div class="generated">Generated: ${esc(generatedAt)}</div>
-      </div>
+  /* Data Table */
+  table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  thead { display: table-header-group; }
+  th { background: #ecfdf5; text-align: left; padding: 8px 6px; font-size: 9px; font-weight: 700; color: var(--primary); border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: 0.3px; }
+  td { padding: 7px 6px; border-bottom: 1px solid #f0fdf4; }
+  tr:nth-child(even) td { background: var(--bg-light); }
+  .qty-cell { background: #fff7ed !important; text-align: center; font-weight: 700; color: var(--success); }
+  .mono { font-family: 'SF Mono', 'Consolas', monospace; font-size: 9px; }
+
+  /* Footer */
+  .page-footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 15mm; font-size: 8px; color: var(--text-muted); border-top: 1px solid var(--border); background: white; display: flex; justify-content: space-between; }
+
+  @media print {
+    body { padding: 0; margin: 0; }
+    .header-bar { margin: 0 0 20px 0; }
+    .page-footer { position: fixed; bottom: 0; }
+  }
+</style></head><body>
+
+<div class="header-bar">
+  <div>
+    <h1>Outbound Logistics Report</h1>
+    <div class="subtitle">${esc(params.frequency)} Analysis • ${esc(dateRange)}</div>
+  </div>
+  <div class="meta">
+    <strong>${esc(reportId)}</strong>
+    Generated: ${esc(generatedAt)}
+  </div>
+</div>
+
+<div class="exec-summary">
+  <div class="exec-title">Executive Summary</div>
+  <div class="kpi-grid">
+    <div class="kpi-card highlight"><span class="kpi-num">${totalQty.toLocaleString()}</span><span class="kpi-lbl">Total Units Shipped</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueOrders.size}</span><span class="kpi-lbl">Total Orders</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueTasks.size}</span><span class="kpi-lbl">Fulfillment Tasks</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueFBPNs.size}</span><span class="kpi-lbl">Unique SKUs</span></div>
+    <div class="kpi-card"><span class="kpi-num">${uniqueCompanies.size}</span><span class="kpi-lbl">Companies Served</span></div>
+    <div class="kpi-card"><span class="kpi-num">${avgDailyQty.toLocaleString()}</span><span class="kpi-lbl">Avg Daily Volume</span></div>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card">
+      <h4>Top Companies by Volume</h4>
+      <ul class="insight-list">
+        ${topCompanies.map(([company, qty]) => `<li><span class="label">${esc(company)}</span><span class="value">${qty.toLocaleString()} units</span></li>`).join('')}
+        ${topCompanies.length === 0 ? '<li><span class="label">No data</span></li>' : ''}
+      </ul>
+    </div>
+    <div class="insight-card">
+      <h4>Top Projects</h4>
+      <ul class="insight-list">
+        ${topProjects.map(([proj, qty]) => `<li><span class="label">${esc(proj)}</span><span class="value">${qty.toLocaleString()} units</span></li>`).join('')}
+        ${topProjects.length === 0 ? '<li><span class="label">No data</span></li>' : ''}
+      </ul>
     </div>
   </div>
-  ${summaryTableHtml}
-  ${bodyHtml}
+
+  <div class="trend-section">
+    <h3>Daily Shipping Trend</h3>
+    <table class="trend-table">
+      <thead><tr><th>Date</th><th>Orders</th><th>Quantity</th></tr></thead>
+      <tbody>${dailyTrendHtml || '<tr><td colspan="3">No daily data</td></tr>'}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="page-break"></div>
+
+<div class="detail-section">
+  <h2>Detailed Shipment Log</h2>
+  ${detailHtml}
+</div>
+
+<div class="page-footer">
+  <span>CONFIDENTIAL — Internal Use Only</span>
+  <span>Report: ${esc(reportId)} | Generated: ${esc(generatedAt)}</span>
+</div>
+
 </body></html>`;
 }
 
 // ============================================================================
-// EXCEL GENERATION & STYLING
+// EXCEL GENERATION & STYLING - ENTERPRISE UI/UX
 // ============================================================================
+
+function saveReportToFolder(blob, reportType, frequency) {
+  const rootFolder = DriveApp.getFolderById(FOLDERS.IMS_Reports);
+  const typeFolder = getOrCreateFolder(rootFolder, reportType + ' Reports');
+  const frequencyFolder = getOrCreateFolder(typeFolder, frequency);
+  const yearFolder = getOrCreateFolder(frequencyFolder, String(new Date().getFullYear()));
+  return yearFolder.createFile(blob);
+}
 
 function saveHtmlAsPdfToReports_(html, filename, reportType, frequency) {
   const blob = HtmlService.createHtmlOutput(html).getBlob().setName(filename).getAs(MimeType.PDF);
@@ -802,31 +810,23 @@ function saveHtmlAsPdfToReports_(html, filename, reportType, frequency) {
 }
 
 function inboundXlsxHeaders_() {
-  return ['Date_Received','Project','Customer_PO_Number','BOL_Number','Warehouse','Push #','Asset Type','Manufacturer','FBPN','MFPN','Qty_Received','UOM','Carrier'];
+  return ['Date Received','Project','PO Number','BOL Number','Warehouse','Push #','Asset Type','Manufacturer','FBPN','MFPN','Qty Received','UOM','Carrier'];
 }
 
 function outboundXlsxHeaders_() {
-  return ['Date','Company','Task_Number','Order_Number','Project','FBPN','Qty','Manufacturer'];
+  return ['Date','Company','Task Number','Order Number','Project','FBPN','Qty','Manufacturer'];
 }
 
 function saveRowsAsXlsxToReports_(rows, headers, filename, reportType, frequency) {
   try {
     const tmp = SpreadsheetApp.create('TEMP_' + filename.replace(/\.xlsx$/i, ''));
-    const sh = tmp.getSheets()[0];
-    sh.setName('Report');
-    sh.getRange(1,1,1,headers.length).setValues([headers]);
 
-    applyReportXlsxStyles_(sh, headers, reportType);
-
-    const values = [];
+    // Create enterprise multi-sheet workbook
     if (reportType === 'Inbound') {
-      rows.forEach(r => values.push([r.dateReceived||'',r.project||'',r.poNumber||'',r.bol||'',r.warehouse||'',r.push||'',r.assetType||'',r.manufacturer||'',r.fbpn||'',r.mfpn||'',r.qty||0,r.uom||'',r.carrier||'']));
+      createInboundEnterpriseWorkbook_(tmp, rows, headers);
     } else {
-      rows.forEach(r => values.push([r.date||'', r.company||'', r.taskNumber||'', r.orderNumber||'', r.project||'', r.fbpn||'', r.qty||0, r.manufacturer||'']));
+      createOutboundEnterpriseWorkbook_(tmp, rows, headers);
     }
-    
-    if (values.length) sh.getRange(2,1,values.length,headers.length).setValues(values);
-    sh.autoResizeColumns(1, headers.length);
 
     const xlsxBlob = exportSpreadsheetAsXlsx_(tmp.getId(), filename);
     const xlsxFile = saveReportXlsxToFolder_(xlsxBlob, reportType, frequency);
@@ -839,32 +839,339 @@ function saveRowsAsXlsxToReports_(rows, headers, filename, reportType, frequency
   }
 }
 
-function applyReportXlsxStyles_(sheet, headers, reportType) {
-  const headerRange = sheet.getRange(1, 1, 1, headers.length);
-  headerRange
-    .setFontWeight('bold')
-    .setFontColor('#111827')
-    .setBackground('#d1d5db') 
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle');
+function createInboundEnterpriseWorkbook_(workbook, rows, headers) {
+  // Calculate metrics
+  let totalQty = 0;
+  const uniqueProjects = new Set();
+  const uniquePOs = new Set();
+  const uniqueBOLs = new Set();
+  const uniqueFBPNs = new Set();
+  const uniqueCarriers = new Set();
+  const dailyData = {};
+  const projectData = {};
+  const carrierData = {};
 
+  rows.forEach(r => {
+    const qty = Number(r.qty || 0) || 0;
+    totalQty += qty;
+    if (r.project) { uniqueProjects.add(r.project); projectData[r.project] = (projectData[r.project] || 0) + qty; }
+    if (r.poNumber) uniquePOs.add(r.poNumber);
+    if (r.bol) uniqueBOLs.add(r.bol);
+    if (r.fbpn) uniqueFBPNs.add(r.fbpn);
+    if (r.carrier) { uniqueCarriers.add(r.carrier); carrierData[r.carrier] = (carrierData[r.carrier] || 0) + qty; }
+    const dateKey = r.dateReceived || 'Unknown';
+    dailyData[dateKey] = dailyData[dateKey] || { bols: 0, qty: 0 };
+    dailyData[dateKey].bols += 1;
+    dailyData[dateKey].qty += qty;
+  });
+
+  // Sheet 1: Executive Summary
+  const summarySheet = workbook.getSheets()[0];
+  summarySheet.setName('Executive Summary');
+  createExecutiveSummarySheet_(summarySheet, 'Inbound', {
+    'Total Units Received': totalQty,
+    'Total Shipments (BOLs)': uniqueBOLs.size,
+    'Unique Purchase Orders': uniquePOs.size,
+    'Unique SKUs (FBPNs)': uniqueFBPNs.size,
+    'Active Projects': uniqueProjects.size,
+    'Carriers Used': uniqueCarriers.size
+  }, rows.length);
+
+  // Sheet 2: Daily Trends
+  const trendsSheet = workbook.insertSheet('Daily Trends');
+  createDailyTrendsSheet_(trendsSheet, dailyData, 'Inbound');
+
+  // Sheet 3: Project Analysis
+  const projectSheet = workbook.insertSheet('Project Analysis');
+  createAnalysisSheet_(projectSheet, projectData, 'Project', totalQty);
+
+  // Sheet 4: Carrier Analysis
+  const carrierSheet = workbook.insertSheet('Carrier Analysis');
+  createAnalysisSheet_(carrierSheet, carrierData, 'Carrier', totalQty);
+
+  // Sheet 5: Detailed Data
+  const dataSheet = workbook.insertSheet('Detailed Data');
+  createDetailedDataSheet_(dataSheet, rows, headers, 'Inbound');
+}
+
+function createOutboundEnterpriseWorkbook_(workbook, rows, headers) {
+  // Calculate metrics
+  let totalQty = 0;
+  const uniqueCompanies = new Set();
+  const uniqueTasks = new Set();
+  const uniqueOrders = new Set();
+  const uniqueFBPNs = new Set();
+  const uniqueProjects = new Set();
+  const dailyData = {};
+  const companyData = {};
+  const projectData = {};
+
+  rows.forEach(r => {
+    const qty = Number(r.qty || 0) || 0;
+    totalQty += qty;
+    if (r.company) { uniqueCompanies.add(r.company); companyData[r.company] = (companyData[r.company] || 0) + qty; }
+    if (r.taskNumber) uniqueTasks.add(r.taskNumber);
+    if (r.orderNumber) uniqueOrders.add(r.orderNumber);
+    if (r.fbpn) uniqueFBPNs.add(r.fbpn);
+    if (r.project) { uniqueProjects.add(r.project); projectData[r.project] = (projectData[r.project] || 0) + qty; }
+    const dateKey = r.date || 'Unknown';
+    dailyData[dateKey] = dailyData[dateKey] || { orders: 0, qty: 0 };
+    dailyData[dateKey].orders += 1;
+    dailyData[dateKey].qty += qty;
+  });
+
+  // Sheet 1: Executive Summary
+  const summarySheet = workbook.getSheets()[0];
+  summarySheet.setName('Executive Summary');
+  createExecutiveSummarySheet_(summarySheet, 'Outbound', {
+    'Total Units Shipped': totalQty,
+    'Total Orders': uniqueOrders.size,
+    'Fulfillment Tasks': uniqueTasks.size,
+    'Unique SKUs (FBPNs)': uniqueFBPNs.size,
+    'Companies Served': uniqueCompanies.size,
+    'Projects': uniqueProjects.size
+  }, rows.length);
+
+  // Sheet 2: Daily Trends
+  const trendsSheet = workbook.insertSheet('Daily Trends');
+  createDailyTrendsSheet_(trendsSheet, dailyData, 'Outbound');
+
+  // Sheet 3: Company Analysis
+  const companySheet = workbook.insertSheet('Company Analysis');
+  createAnalysisSheet_(companySheet, companyData, 'Company', totalQty);
+
+  // Sheet 4: Project Analysis
+  const projectSheet = workbook.insertSheet('Project Analysis');
+  createAnalysisSheet_(projectSheet, projectData, 'Project', totalQty);
+
+  // Sheet 5: Detailed Data
+  const dataSheet = workbook.insertSheet('Detailed Data');
+  createDetailedDataSheet_(dataSheet, rows, headers, 'Outbound');
+}
+
+function createExecutiveSummarySheet_(sheet, reportType, metrics, rowCount) {
+  const isInbound = reportType === 'Inbound';
+  const primaryColor = isInbound ? '#1e3a5f' : '#065f46';
+  const accentColor = isInbound ? '#0ea5e9' : '#10b981';
+  const lightBg = isInbound ? '#eff6ff' : '#f0fdf4';
+
+  // Title Section
+  sheet.getRange('A1:F1').merge().setValue(reportType.toUpperCase() + ' LOGISTICS REPORT').setFontSize(18).setFontWeight('bold').setFontColor(primaryColor).setBackground('#f8fafc');
+  sheet.getRange('A2:F2').merge().setValue('Executive Summary').setFontSize(12).setFontColor('#64748b').setBackground('#f8fafc');
+  sheet.getRange('A3:F3').merge().setValue('Generated: ' + new Date().toLocaleString()).setFontSize(9).setFontColor('#94a3b8').setBackground('#f8fafc');
+
+  // KPI Section Header
+  sheet.getRange('A5:F5').merge().setValue('KEY PERFORMANCE INDICATORS').setFontSize(11).setFontWeight('bold').setFontColor('#ffffff').setBackground(primaryColor).setHorizontalAlignment('center');
+
+  // KPI Cards
+  let row = 6;
+  const metricEntries = Object.entries(metrics);
+  for (let i = 0; i < metricEntries.length; i += 3) {
+    const cols = ['A', 'C', 'E'];
+    for (let j = 0; j < 3 && i + j < metricEntries.length; j++) {
+      const [label, value] = metricEntries[i + j];
+      const col = cols[j];
+      const colNum = col.charCodeAt(0) - 64;
+      sheet.getRange(row, colNum).setValue(typeof value === 'number' ? value.toLocaleString() : value).setFontSize(22).setFontWeight('bold').setFontColor(primaryColor).setHorizontalAlignment('center');
+      sheet.getRange(row + 1, colNum).setValue(label).setFontSize(9).setFontColor('#64748b').setHorizontalAlignment('center');
+    }
+    row += 3;
+  }
+
+  // Report Info Section
+  row += 1;
+  sheet.getRange(row, 1, 1, 6).merge().setValue('REPORT INFORMATION').setFontSize(11).setFontWeight('bold').setFontColor('#ffffff').setBackground(primaryColor).setHorizontalAlignment('center');
+  row++;
+  sheet.getRange(row, 1).setValue('Report Type:').setFontWeight('bold');
+  sheet.getRange(row, 2).setValue(reportType + ' Logistics');
+  sheet.getRange(row, 4).setValue('Total Records:').setFontWeight('bold');
+  sheet.getRange(row, 5).setValue(rowCount.toLocaleString());
+  row++;
+  sheet.getRange(row, 1).setValue('Generated:').setFontWeight('bold');
+  sheet.getRange(row, 2).setValue(new Date().toLocaleString());
+  sheet.getRange(row, 4).setValue('Status:').setFontWeight('bold');
+  sheet.getRange(row, 5).setValue('Complete').setFontColor('#059669').setFontWeight('bold');
+
+  // Styling
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 150);
+  sheet.setColumnWidth(3, 150);
+  sheet.setColumnWidth(4, 150);
+  sheet.setColumnWidth(5, 150);
+  sheet.setColumnWidth(6, 150);
+  sheet.setFrozenRows(4);
+
+  // Add borders
+  sheet.getRange('A5:F' + row).setBorder(true, true, true, true, true, true, '#e2e8f0', SpreadsheetApp.BorderStyle.SOLID);
+}
+
+function createDailyTrendsSheet_(sheet, dailyData, reportType) {
+  const isInbound = reportType === 'Inbound';
+  const primaryColor = isInbound ? '#1e3a5f' : '#065f46';
+  const headerColor = isInbound ? '#dbeafe' : '#d1fae5';
+  const label = isInbound ? 'Shipments' : 'Orders';
+
+  // Headers
+  sheet.getRange('A1:D1').setValues([['Date', label, 'Quantity', '% of Total']]).setFontWeight('bold').setFontColor('#ffffff').setBackground(primaryColor).setHorizontalAlignment('center');
+
+  // Calculate total
+  let totalQty = 0;
+  Object.values(dailyData).forEach(d => totalQty += d.qty);
+
+  // Data
+  const sortedDates = Object.entries(dailyData).sort((a, b) => a[0].localeCompare(b[0]));
+  const values = sortedDates.map(([date, data]) => {
+    const count = isInbound ? data.bols : data.orders;
+    const pct = totalQty > 0 ? ((data.qty / totalQty) * 100).toFixed(1) + '%' : '0%';
+    return [date, count, data.qty, pct];
+  });
+
+  if (values.length > 0) {
+    sheet.getRange(2, 1, values.length, 4).setValues(values);
+
+    // Alternate row colors
+    for (let i = 0; i < values.length; i++) {
+      if (i % 2 === 0) {
+        sheet.getRange(i + 2, 1, 1, 4).setBackground(headerColor);
+      }
+    }
+
+    // Number formatting
+    sheet.getRange(2, 2, values.length, 1).setNumberFormat('#,##0');
+    sheet.getRange(2, 3, values.length, 1).setNumberFormat('#,##0');
+  }
+
+  // Totals row
+  const totalRow = values.length + 2;
+  sheet.getRange(totalRow, 1).setValue('TOTAL').setFontWeight('bold').setBackground('#f1f5f9');
+  sheet.getRange(totalRow, 2).setFormula('=SUM(B2:B' + (totalRow - 1) + ')').setFontWeight('bold').setBackground('#f1f5f9').setNumberFormat('#,##0');
+  sheet.getRange(totalRow, 3).setFormula('=SUM(C2:C' + (totalRow - 1) + ')').setFontWeight('bold').setBackground('#f1f5f9').setNumberFormat('#,##0');
+  sheet.getRange(totalRow, 4).setValue('100%').setFontWeight('bold').setBackground('#f1f5f9');
+
+  // Styling
   sheet.setFrozenRows(1);
-  const lastRow = Math.max(sheet.getLastRow(), 2);
-  const bodyRange = sheet.getRange(2, 1, lastRow - 1, headers.length);
-  bodyRange
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle')
-    .setFontWeight('bold');
-  
-  bodyRange.setBorder(true, true, true, true, true, true, '#e5e7eb', SpreadsheetApp.BorderStyle.SOLID);
+  sheet.setColumnWidth(1, 120);
+  sheet.setColumnWidth(2, 100);
+  sheet.setColumnWidth(3, 120);
+  sheet.setColumnWidth(4, 100);
+  sheet.getRange('A1:D' + totalRow).setBorder(true, true, true, true, true, true, '#e2e8f0', SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange('B:D').setHorizontalAlignment('center');
+}
+
+function createAnalysisSheet_(sheet, data, label, totalQty) {
+  const primaryColor = '#1e3a5f';
+  const headerColor = '#f1f5f9';
+
+  // Headers
+  sheet.getRange('A1:E1').setValues([['Rank', label, 'Quantity', '% of Total', 'Cumulative %']]).setFontWeight('bold').setFontColor('#ffffff').setBackground(primaryColor).setHorizontalAlignment('center');
+
+  // Sort and prepare data
+  const sorted = Object.entries(data).sort((a, b) => b[1] - a[1]);
+  let cumulative = 0;
+  const values = sorted.map(([name, qty], i) => {
+    const pct = totalQty > 0 ? (qty / totalQty) * 100 : 0;
+    cumulative += pct;
+    return [i + 1, name, qty, pct.toFixed(1) + '%', cumulative.toFixed(1) + '%'];
+  });
+
+  if (values.length > 0) {
+    sheet.getRange(2, 1, values.length, 5).setValues(values);
+
+    // Alternate row colors
+    for (let i = 0; i < values.length; i++) {
+      if (i % 2 === 0) {
+        sheet.getRange(i + 2, 1, 1, 5).setBackground(headerColor);
+      }
+    }
+
+    // Highlight top 3
+    for (let i = 0; i < Math.min(3, values.length); i++) {
+      sheet.getRange(i + 2, 1, 1, 5).setFontWeight('bold').setBackground('#fef3c7');
+    }
+
+    // Number formatting
+    sheet.getRange(2, 3, values.length, 1).setNumberFormat('#,##0');
+  }
+
+  // Totals row
+  const totalRow = values.length + 2;
+  sheet.getRange(totalRow, 1).setValue('').setBackground('#e2e8f0');
+  sheet.getRange(totalRow, 2).setValue('TOTAL').setFontWeight('bold').setBackground('#e2e8f0');
+  sheet.getRange(totalRow, 3).setFormula('=SUM(C2:C' + (totalRow - 1) + ')').setFontWeight('bold').setBackground('#e2e8f0').setNumberFormat('#,##0');
+  sheet.getRange(totalRow, 4).setValue('100%').setFontWeight('bold').setBackground('#e2e8f0');
+  sheet.getRange(totalRow, 5).setValue('').setBackground('#e2e8f0');
+
+  // Styling
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 60);
+  sheet.setColumnWidth(2, 200);
+  sheet.setColumnWidth(3, 120);
+  sheet.setColumnWidth(4, 100);
+  sheet.setColumnWidth(5, 110);
+  sheet.getRange('A1:E' + totalRow).setBorder(true, true, true, true, true, true, '#e2e8f0', SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange('A:A').setHorizontalAlignment('center');
+  sheet.getRange('C:E').setHorizontalAlignment('center');
+}
+
+function createDetailedDataSheet_(sheet, rows, headers, reportType) {
+  const isInbound = reportType === 'Inbound';
+  const primaryColor = isInbound ? '#1e3a5f' : '#065f46';
+  const headerColor = isInbound ? '#dbeafe' : '#d1fae5';
+
+  // Headers
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setFontColor('#ffffff').setBackground(primaryColor).setHorizontalAlignment('center');
+
+  // Data
+  const values = [];
+  if (isInbound) {
+    rows.forEach(r => values.push([
+      r.dateReceived || '', r.project || '', r.poNumber || '', r.bol || '',
+      r.warehouse || '', r.push || '', r.assetType || '', r.manufacturer || '',
+      r.fbpn || '', r.mfpn || '', r.qty || 0, r.uom || '', r.carrier || ''
+    ]));
+  } else {
+    rows.forEach(r => values.push([
+      r.date || '', r.company || '', r.taskNumber || '', r.orderNumber || '',
+      r.project || '', r.fbpn || '', r.qty || 0, r.manufacturer || ''
+    ]));
+  }
+
+  if (values.length > 0) {
+    sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+
+    // Alternate row colors
+    for (let i = 0; i < values.length; i++) {
+      if (i % 2 === 0) {
+        sheet.getRange(i + 2, 1, 1, headers.length).setBackground(headerColor);
+      }
+    }
+
+    // Number formatting for quantity column
+    const qtyCol = isInbound ? 11 : 7;
+    sheet.getRange(2, qtyCol, values.length, 1).setNumberFormat('#,##0').setHorizontalAlignment('center');
+  }
+
+  // Styling
+  sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, headers.length);
+
+  // Add filter
+  if (values.length > 0) {
+    sheet.getRange(1, 1, values.length + 1, headers.length).createFilter();
+  }
+
+  // Borders
+  const lastRow = Math.max(2, values.length + 1);
+  sheet.getRange(1, 1, lastRow, headers.length).setBorder(true, true, true, true, true, true, '#e2e8f0', SpreadsheetApp.BorderStyle.SOLID);
 }
 
 function exportSpreadsheetAsXlsx_(spreadsheetId, filename) {
-  const file = DriveApp.getFileById(spreadsheetId);
-  const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  const blob = file.getBlob().getAs(mime);
-  blob.setName(filename);
+  const url = 'https://docs.google.com/spreadsheets/d/' + spreadsheetId + '/export?format=xlsx';
+  const token = ScriptApp.getOAuthToken();
+  const response = UrlFetchApp.fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  const blob = response.getBlob().setName(filename);
   return blob;
 }
 
